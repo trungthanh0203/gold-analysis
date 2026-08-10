@@ -131,6 +131,11 @@
           Biểu đồ giá — <span id="tfLabel">H1</span>
           <span class="badge-live off" id="liveBadge">CHƯA CÓ DỮ LIỆU</span>
         </div>
+        <div style="display:flex; gap:14px; margin:-4px 0 10px; font-size:11px; color:var(--text2);">
+          <span><span style="display:inline-block;width:10px;height:2px;background:#5EC8E8;margin-right:5px;vertical-align:middle;"></span>MA14</span>
+          <span><span style="display:inline-block;width:10px;height:2px;background:#B187E8;margin-right:5px;vertical-align:middle;"></span>MA34</span>
+          <span><span style="display:inline-block;width:10px;height:2px;background:#D9A94E;margin-right:5px;vertical-align:middle;"></span>MA100</span>
+        </div>
         <canvas id="chart"></canvas>
       </div>
 
@@ -204,7 +209,7 @@ const API_PATH = "/api/analyze";
 const canvas = document.getElementById('chart');
 const ctx = canvas.getContext('2d');
 
-function drawChart(candles){
+function drawChart(candles, maLines, overlay){
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
@@ -215,8 +220,11 @@ function drawChart(candles){
   if(!candles || candles.length===0) return;
 
   const highs = candles.map(c=>c.high), lows = candles.map(c=>c.low);
-  const max = Math.max(...highs), min = Math.min(...lows);
-  const pad = (max-min)*0.08 || 1;
+  let max = Math.max(...highs), min = Math.min(...lows);
+  if(overlay){
+    [overlay.entry, overlay.sl, overlay.tp].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} });
+  }
+  const pad = (max-min)*0.1 || 1;
   const top = max+pad, bottom = min-pad;
   const yScale = v => H - ((v-bottom)/(top-bottom))*H;
 
@@ -237,6 +245,65 @@ function drawChart(candles){
     ctx.fillRect(x-bodyW/2, Math.min(yO,yC), bodyW, bh);
   });
 
+  // ---- Duong MA14 / MA34 / MA100 ----
+  function drawMaLine(values, color){
+    if(!values) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+    let started = false;
+    values.forEach((v,i)=>{
+      if(v==null) return;
+      const x = i*cw + cw/2, y = yScale(v);
+      if(!started){ ctx.moveTo(x,y); started = true; } else { ctx.lineTo(x,y); }
+    });
+    if(started) ctx.stroke();
+  }
+  if(maLines){
+    drawMaLine(maLines.ma100, '#D9A94E');
+    drawMaLine(maLines.ma34, '#B187E8');
+    drawMaLine(maLines.ma14, '#5EC8E8');
+  }
+
+  // ---- Cac muc Entry / SL / TP ----
+  if(overlay){
+    const levels = [
+      {v:overlay.entry, color:'#EDEDEF', label:'Entry'},
+      {v:overlay.sl, color:'#E0554A', label:'SL'},
+      {v:overlay.tp, color:'#3FB878', label:'TP'},
+    ];
+    levels.forEach(lv=>{
+      if(lv.v==null) return;
+      const y = yScale(lv.v);
+      ctx.strokeStyle = lv.color; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = lv.color; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`${lv.label} ${lv.v.toFixed(2)}`, 6, y-4);
+    });
+
+    // ---- Mui ten tin hieu tai nen cuoi ----
+    const lastX = (candles.length-1)*cw + cw/2;
+    const lastC = candles[candles.length-1];
+    if(overlay.dir > 0){
+      const y = yScale(lastC.low) + 18;
+      ctx.fillStyle = '#3FB878';
+      ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y-12); ctx.closePath(); ctx.fill();
+      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+      ctx.fillText(`${overlay.verdict} (+${overlay.score})`, lastX, y+16);
+    } else if(overlay.dir < 0){
+      const y = yScale(lastC.high) - 18;
+      ctx.fillStyle = '#E0554A';
+      ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y+12); ctx.closePath(); ctx.fill();
+      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+      ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-8);
+    } else {
+      const y = yScale(lastC.close);
+      ctx.fillStyle = '#9B9AA3';
+      ctx.beginPath(); ctx.arc(lastX, y, 4, 0, Math.PI*2); ctx.fill();
+      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+      ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-12);
+    }
+  }
+
   ctx.fillStyle = '#5F5E67'; ctx.font = '11px JetBrains Mono, monospace'; ctx.textAlign = 'right';
   for(let i=0;i<=4;i++){ const val = top - ((top-bottom)/4)*i; ctx.fillText(val.toFixed(1), W-6, (H/4)*i + 12); }
 }
@@ -246,7 +313,25 @@ function tagText(v){ return v>0?'Mua':(v<0?'Bán':'Trung lập'); }
 
 function renderResult(data){
   const candles = data.candles.map(c => ({open:+c.open, high:+c.high, low:+c.low, close:+c.close}));
-  drawChart(candles);
+  const sig = data.signal;
+
+  // Tinh Entry/SL/TP TRUOC de ve len chart
+  let overlay = null;
+  if(candles.length){
+    const last = candles[candles.length-1];
+    const recent = candles.slice(-14);
+    const range = Math.max(...recent.map(c=>c.high)) - Math.min(...recent.map(c=>c.low));
+    const risk = range*0.15 || 1;
+    const dir = sig.score>0 ? 1 : (sig.score<0 ? -1 : 0);
+    overlay = {
+      entry: last.close,
+      sl: dir!==0 ? last.close - dir*risk : null,
+      tp: dir!==0 ? last.close + dir*risk*2 : null,
+      dir, verdict: sig.verdict, score: sig.score,
+    };
+  }
+
+  drawChart(candles, data.moving_averages, overlay);
   document.getElementById('tfLabel').textContent = data.timeframe;
   document.getElementById('liveBadge').textContent = 'DỮ LIỆU THẬT · TWELVEDATA';
   document.getElementById('liveBadge').className = 'badge-live on';
@@ -262,7 +347,6 @@ function renderResult(data){
     deltaEl.className = 'price-delta ' + (delta>=0?'up':'down');
   }
 
-  const sig = data.signal;
   document.getElementById('gaugeScore').textContent = (sig.score>=0?'+':'') + sig.score;
   document.getElementById('verdictBadge').textContent = sig.verdict;
   document.getElementById('needle').setAttribute('transform', `rotate(${(sig.score/100)*80} 90 90)`);
@@ -315,16 +399,11 @@ function renderResult(data){
     modeBadge.textContent = '';
   }
 
-  if(candles.length){
-    const last = candles[candles.length-1];
-    const recent = candles.slice(-14);
-    const range = Math.max(...recent.map(c=>c.high)) - Math.min(...recent.map(c=>c.low));
-    const risk = range*0.15 || 1;
-    const dir = sig.score>=0 ? 1 : -1;
-    document.getElementById('lvlEntry').textContent = last.close.toFixed(2);
-    document.getElementById('lvlSl').textContent = (last.close - dir*risk).toFixed(2);
-    document.getElementById('lvlTp').textContent = (last.close + dir*risk*2).toFixed(2);
-    document.getElementById('lvlRr').textContent = '1 : 2.0';
+  if(overlay && overlay.entry!=null){
+    document.getElementById('lvlEntry').textContent = overlay.entry.toFixed(2);
+    document.getElementById('lvlSl').textContent = overlay.sl!=null ? overlay.sl.toFixed(2) : '—';
+    document.getElementById('lvlTp').textContent = overlay.tp!=null ? overlay.tp.toFixed(2) : '—';
+    document.getElementById('lvlRr').textContent = overlay.dir!==0 ? '1 : 2.0' : '—';
   }
 }
 
