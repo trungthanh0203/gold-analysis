@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XAU/USD — Bảng phân tích vàng đa khung thời gian</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0B0D; --surface:#151519; --surface2:#1D1D23; --border:#2A2A31;
+    --gold:#D9A94E; --gold-dim:#8A6D2F; --gold-glow:rgba(217,169,78,.18);
+    --up:#3FB878; --down:#E0554A;
+    --text:#EDEDEF; --text2:#9B9AA3; --text3:#5F5E67;
+    --font-d:'Space Grotesk',sans-serif; --font-b:'Inter',sans-serif; --font-m:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{background:var(--bg); color:var(--text); font-family:var(--font-b); -webkit-font-smoothing:antialiased;}
+  .app{max-width:1180px; margin:0 auto; padding:28px 20px 60px;}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; padding-bottom:20px; border-bottom:1px solid var(--border); margin-bottom:22px;}
+  .symbol-block{display:flex; align-items:center; gap:14px;}
+  .symbol-mark{width:40px; height:40px; border-radius:10px; background:linear-gradient(155deg, var(--gold), var(--gold-dim)); display:flex; align-items:center; justify-content:center; font-family:var(--font-d); font-weight:700; color:#1a1408; font-size:15px;}
+  .symbol-name{font-family:var(--font-d); font-weight:600; font-size:20px; letter-spacing:.2px;}
+  .symbol-sub{font-size:12px; color:var(--text3); margin-top:1px;}
+  .price-block{text-align:right;}
+  .price-live{font-family:var(--font-m); font-size:26px; font-weight:700; letter-spacing:.3px;}
+  .price-delta{font-family:var(--font-m); font-size:13px; font-weight:500; margin-top:2px;}
+  .price-delta.up{color:var(--up);} .price-delta.down{color:var(--down);}
+
+  .controls-row{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:20px;}
+  .tf-row{display:flex; gap:6px;}
+  .tf-btn{font-family:var(--font-m); font-size:13px; font-weight:600; color:var(--text2); background:var(--surface); border:1px solid var(--border); padding:8px 16px; border-radius:8px; cursor:pointer; transition:.15s;}
+  .tf-btn:hover{color:var(--text); border-color:var(--text3);}
+  .tf-btn.active{color:#1a1408; background:var(--gold); border-color:var(--gold);}
+
+  .analyze-btn{font-family:var(--font-d); font-size:14px; font-weight:600; color:#1a1408; background:var(--gold); border:none; padding:10px 22px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:.15s;}
+  .analyze-btn:hover{background:#e8bb60;}
+  .analyze-btn:disabled{opacity:.6; cursor:progress;}
+  .analyze-btn .dot{width:7px; height:7px; border-radius:50%; background:#1a1408; opacity:.7;}
+  .status-line{font-family:var(--font-m); font-size:11.5px; color:var(--text3); margin-top:8px;}
+
+  .grid{display:grid; grid-template-columns:1fr 300px; gap:18px;}
+  @media (max-width:860px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; margin-bottom:18px;}
+  .panel-title{font-family:var(--font-d); font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
+
+  canvas{display:block; width:100%; height:380px;}
+
+  .indicator-strip{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  .ind-card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px;}
+  .ind-label{font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;}
+  .ind-val{font-family:var(--font-m); font-size:17px; font-weight:600;}
+  .ind-tag{font-size:11px; font-weight:600; margin-top:4px; display:inline-block; padding:2px 7px; border-radius:5px;}
+  .tag-buy{color:var(--up); background:rgba(63,184,120,.12);}
+  .tag-sell{color:var(--down); background:rgba(224,85,74,.12);}
+  .tag-neutral{color:var(--text2); background:rgba(255,255,255,.06);}
+
+  .reason-list{display:flex; flex-direction:column; gap:10px;}
+  .reason-item{display:flex; gap:10px; align-items:flex-start; font-size:13px; line-height:1.55; color:var(--text2);}
+  .reason-dot{flex-shrink:0; width:6px; height:6px; border-radius:50%; background:var(--gold); margin-top:7px;}
+  .reason-summary{margin-top:14px; padding-top:14px; border-top:1px solid var(--border); font-size:13px; line-height:1.6; color:var(--text);}
+
+  .gauge-wrap{display:flex; flex-direction:column; align-items:center; padding:6px 0 4px;}
+  .gauge-score{font-family:var(--font-m); font-size:30px; font-weight:700; margin-top:-56px;}
+  .gauge-caption{font-size:11px; color:var(--text3); margin-top:2px;}
+
+  .verdict{text-align:center; margin:14px 0 18px;}
+  .verdict-badge{display:inline-block; font-family:var(--font-d); font-weight:700; font-size:15px; letter-spacing:.3px; padding:8px 20px; border-radius:999px; background:var(--gold-glow); color:var(--gold); border:1px solid rgba(217,169,78,.4);}
+
+  .breakdown{display:flex; flex-direction:column; gap:10px; margin-bottom:18px;}
+  .bd-row{display:flex; align-items:center; gap:10px;}
+  .bd-name{font-size:12.5px; color:var(--text2); width:96px; flex-shrink:0;}
+  .bd-bar{flex:1; height:5px; background:var(--surface2); border-radius:3px; overflow:hidden; position:relative;}
+  .bd-fill{position:absolute; top:0; bottom:0; border-radius:3px;}
+  .bd-fill.pos{background:var(--up); left:50%;}
+  .bd-fill.neg{background:var(--down); right:50%;}
+  .bd-tag{font-family:var(--font-m); font-size:11px; width:34px; text-align:right; color:var(--text3);}
+
+  .levels{border-top:1px solid var(--border); padding-top:14px; display:flex; flex-direction:column; gap:9px;}
+  .lvl-row{display:flex; justify-content:space-between; font-size:12.5px;}
+  .lvl-name{color:var(--text3);}
+  .lvl-val{font-family:var(--font-m); font-weight:600;}
+  .lvl-val.sl{color:var(--down);} .lvl-val.tp{color:var(--up);}
+
+  .disclaimer{margin-top:4px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; font-size:11.5px; color:var(--text3); line-height:1.6; background:rgba(255,255,255,.02);}
+  .badge-live{font-size:10px; font-weight:600; padding:2px 8px; border-radius:5px; letter-spacing:.4px;}
+  .badge-live.on{color:var(--up); background:rgba(63,184,120,.12);}
+  .badge-live.off{color:var(--text3); background:rgba(255,255,255,.05);}
+  .badge-live.err{color:var(--down); background:rgba(224,85,74,.12);}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="symbol-block">
+      <div class="symbol-mark">Au</div>
+      <div>
+        <div class="symbol-name">XAU / USD</div>
+        <div class="symbol-sub">Vàng giao ngay · Spot Gold</div>
+      </div>
+    </div>
+    <div class="price-block">
+      <div class="price-live" id="livePrice">—</div>
+      <div class="price-delta" id="liveDelta"></div>
+    </div>
+  </div>
+
+  <div class="controls-row">
+    <div>
+      <div class="tf-row" id="tfRow">
+        <button class="tf-btn" data-tf="M5">M5</button>
+        <button class="tf-btn" data-tf="M15">M15</button>
+        <button class="tf-btn active" data-tf="H1">H1</button>
+        <button class="tf-btn" data-tf="H4">H4</button>
+        <button class="tf-btn" data-tf="D1">D1</button>
+        <button class="tf-btn" data-tf="W1">W1</button>
+      </div>
+      <div class="status-line" id="statusLine">Bấm "Phân tích" để lấy dữ liệu thật mới nhất và chạy phân tích.</div>
+    </div>
+    <button class="analyze-btn" id="analyzeBtn"><span class="dot"></span> Phân tích XAU/USD</button>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <div class="panel-title">
+          Biểu đồ giá — <span id="tfLabel">H1</span>
+          <span class="badge-live off" id="liveBadge">CHƯA CÓ DỮ LIỆU</span>
+        </div>
+        <canvas id="chart"></canvas>
+      </div>
+
+      <div class="indicator-strip">
+        <div class="ind-card"><div class="ind-label">RSI (14)</div><div class="ind-val" id="rsiVal">—</div><span class="ind-tag tag-neutral" id="rsiTag">—</span></div>
+        <div class="ind-card"><div class="ind-label">MACD</div><div class="ind-val" id="macdVal">—</div><span class="ind-tag tag-neutral" id="macdTag">—</span></div>
+        <div class="ind-card"><div class="ind-label">MA 20/50</div><div class="ind-val" id="maVal">—</div><span class="ind-tag tag-neutral" id="maTag">—</span></div>
+        <div class="ind-card"><div class="ind-label">Bollinger</div><div class="ind-val" id="bbVal">—</div><span class="ind-tag tag-neutral" id="bbTag">—</span></div>
+      </div>
+
+      <div class="panel" style="margin-top:18px;">
+        <div class="panel-title">Phân tích &amp; đánh giá — vì sao có tín hiệu này</div>
+        <div class="reason-list" id="reasonList">
+          <div class="reason-item"><div class="reason-dot"></div>Chưa có dữ liệu phân tích. Bấm nút "Phân tích XAU/USD" ở trên.</div>
+        </div>
+        <div class="reason-summary" id="reasonSummary"></div>
+      </div>
+    </div>
+
+    <div class="panel" style="height:fit-content;">
+      <div class="panel-title">Tín hiệu tổng hợp</div>
+
+      <div class="gauge-wrap">
+        <svg width="180" height="100" viewBox="0 0 180 100">
+          <defs>
+            <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#E0554A"/>
+              <stop offset="50%" stop-color="#D9A94E"/>
+              <stop offset="100%" stop-color="#3FB878"/>
+            </linearGradient>
+          </defs>
+          <path d="M 14 90 A 76 76 0 0 1 166 90" fill="none" stroke="#232329" stroke-width="12" stroke-linecap="round"/>
+          <path d="M 14 90 A 76 76 0 0 1 166 90" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" stroke-dasharray="239" id="gaugeArc"/>
+          <line id="needle" x1="90" y1="90" x2="90" y2="26" stroke="#EDEDEF" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="90" cy="90" r="5" fill="#EDEDEF"/>
+        </svg>
+        <div class="gauge-score" id="gaugeScore">0</div>
+        <div class="gauge-caption">Điểm hợp lưu tín hiệu (-100 → +100)</div>
+      </div>
+
+      <div class="verdict">
+        <div class="verdict-badge" id="verdictBadge">CHƯA PHÂN TÍCH</div>
+      </div>
+
+      <div class="breakdown" id="breakdownList"></div>
+
+      <div class="levels">
+        <div class="lvl-row"><span class="lvl-name">Entry đề xuất</span><span class="lvl-val" id="lvlEntry">—</span></div>
+        <div class="lvl-row"><span class="lvl-name">Stop loss</span><span class="lvl-val sl" id="lvlSl">—</span></div>
+        <div class="lvl-row"><span class="lvl-name">Take profit</span><span class="lvl-val tp" id="lvlTp">—</span></div>
+        <div class="lvl-row"><span class="lvl-name">Tỷ lệ R:R</span><span class="lvl-val" id="lvlRr">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    Mọi khuyến nghị trên trang chỉ mang tính tham khảo kỹ thuật dựa trên dữ liệu lịch sử, không phải lời khuyên đầu tư. Quyết định giao dịch và quản lý rủi ro vẫn thuộc về người dùng.
+  </div>
+
+</div>
+
+<script>
+// API cùng domain khi deploy trên Vercel (frontend + api chung 1 project) -> dùng đường dẫn tương đối
+const API_PATH = "/api/analyze";
+
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function drawChart(candles){
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 380 * dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const W = rect.width, H = 380;
+  ctx.clearRect(0,0,W,H);
+  if(!candles || candles.length===0) return;
+
+  const highs = candles.map(c=>c.high), lows = candles.map(c=>c.low);
+  const max = Math.max(...highs), min = Math.min(...lows);
+  const pad = (max-min)*0.08 || 1;
+  const top = max+pad, bottom = min-pad;
+  const yScale = v => H - ((v-bottom)/(top-bottom))*H;
+
+  ctx.strokeStyle = '#202026'; ctx.lineWidth = 1;
+  for(let i=0;i<=4;i++){ const y=(H/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  const cw = W/candles.length;
+  const bodyW = Math.max(cw*0.55, 1.5);
+  candles.forEach((c,i)=>{
+    const x = i*cw + cw/2;
+    const up = c.close >= c.open;
+    ctx.strokeStyle = up ? '#3FB878' : '#E0554A';
+    ctx.fillStyle = up ? '#3FB878' : '#E0554A';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, yScale(c.high)); ctx.lineTo(x, yScale(c.low)); ctx.stroke();
+    const yO = yScale(c.open), yC = yScale(c.close);
+    const bh = Math.max(Math.abs(yC-yO), 1);
+    ctx.fillRect(x-bodyW/2, Math.min(yO,yC), bodyW, bh);
+  });
+
+  ctx.fillStyle = '#5F5E67'; ctx.font = '11px JetBrains Mono, monospace'; ctx.textAlign = 'right';
+  for(let i=0;i<=4;i++){ const val = top - ((top-bottom)/4)*i; ctx.fillText(val.toFixed(1), W-6, (H/4)*i + 12); }
+}
+
+function tagClass(v){ return v>0?'tag-buy':(v<0?'tag-sell':'tag-neutral'); }
+function tagText(v){ return v>0?'Mua':(v<0?'Bán':'Trung lập'); }
+
+function renderResult(data){
+  const candles = data.candles.map(c => ({open:+c.open, high:+c.high, low:+c.low, close:+c.close}));
+  drawChart(candles);
+  document.getElementById('tfLabel').textContent = data.timeframe;
+  document.getElementById('liveBadge').textContent = 'DỮ LIỆU THẬT · TWELVEDATA';
+  document.getElementById('liveBadge').className = 'badge-live on';
+
+  if(candles.length){
+    const last = candles[candles.length-1];
+    const prev = candles.length>1 ? candles[candles.length-2] : last;
+    document.getElementById('livePrice').textContent = last.close.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const delta = last.close - prev.close;
+    const pct = prev.close ? (delta/prev.close*100).toFixed(2) : '0.00';
+    const deltaEl = document.getElementById('liveDelta');
+    deltaEl.textContent = (delta>=0?'▲ ':'▼ ') + Math.abs(delta).toFixed(2) + ' (' + Math.abs(pct) + '%)';
+    deltaEl.className = 'price-delta ' + (delta>=0?'up':'down');
+  }
+
+  const sig = data.signal;
+  document.getElementById('gaugeScore').textContent = (sig.score>=0?'+':'') + sig.score;
+  document.getElementById('verdictBadge').textContent = sig.verdict;
+  document.getElementById('needle').setAttribute('transform', `rotate(${(sig.score/100)*80} 90 90)`);
+
+  const bdContainer = document.getElementById('breakdownList');
+  bdContainer.innerHTML = '';
+  Object.entries(sig.details||{}).forEach(([name, val])=>{
+    const pct = Math.abs(val)*25 + 6;
+    const row = document.createElement('div');
+    row.className = 'bd-row';
+    row.innerHTML = `<div class="bd-name">${name}</div>
+      <div class="bd-bar"><div class="bd-fill ${val>=0?'pos':'neg'}" style="width:${pct}%"></div></div>
+      <div class="bd-tag">${val>0?'+1':(val<0?'-1':'0')}</div>`;
+    bdContainer.appendChild(row);
+  });
+
+  const v = sig.values || {};
+  const setInd = (valId, tagId, value, detailKey, display) => {
+    const detail = (sig.details||{})[detailKey];
+    document.getElementById(valId).textContent = display;
+    const tagEl = document.getElementById(tagId);
+    if(detail !== undefined){ tagEl.textContent = tagText(detail); tagEl.className = 'ind-tag ' + tagClass(detail); }
+  };
+  setInd('rsiVal','rsiTag', v.rsi, 'RSI', v.rsi ?? '—');
+  setInd('macdVal','macdTag', v.macd, 'MACD', v.macd ?? '—');
+  setInd('maVal','maTag', v.ma20, 'MA_Trend', (sig.details||{}).MA_Trend>0 ? 'Golden' : 'Death');
+  setInd('bbVal','bbTag', v.bb_mid, 'Bollinger',
+    (sig.details||{}).Bollinger>0 ? 'Dải dưới' : ((sig.details||{}).Bollinger<0 ? 'Dải trên' : 'Giữa dải'));
+
+  const reasonList = document.getElementById('reasonList');
+  reasonList.innerHTML = '';
+  (sig.reasons||[]).forEach(text=>{
+    const item = document.createElement('div');
+    item.className = 'reason-item';
+    item.innerHTML = `<div class="reason-dot"></div>${text}`;
+    reasonList.appendChild(item);
+  });
+  document.getElementById('reasonSummary').textContent = sig.summary || '';
+
+  if(candles.length){
+    const last = candles[candles.length-1];
+    const recent = candles.slice(-14);
+    const range = Math.max(...recent.map(c=>c.high)) - Math.min(...recent.map(c=>c.low));
+    const risk = range*0.15 || 1;
+    const dir = sig.score>=0 ? 1 : -1;
+    document.getElementById('lvlEntry').textContent = last.close.toFixed(2);
+    document.getElementById('lvlSl').textContent = (last.close - dir*risk).toFixed(2);
+    document.getElementById('lvlTp').textContent = (last.close + dir*risk*2).toFixed(2);
+    document.getElementById('lvlRr').textContent = '1 : 2.0';
+  }
+}
+
+async function runAnalysis(){
+  const btn = document.getElementById('analyzeBtn');
+  const status = document.getElementById('statusLine');
+  const tf = document.querySelector('.tf-btn.active').dataset.tf;
+
+  btn.disabled = true; btn.innerHTML = '<span class="dot"></span> Đang phân tích...';
+  status.textContent = `Đang lấy dữ liệu thật cho khung ${tf} từ TwelveData...`;
+
+  try{
+    const res = await fetch(`${API_PATH}?timeframe=${tf}`);
+    const data = await res.json();
+    if(!res.ok || data.error) throw new Error(data.error || ('API lỗi ' + res.status));
+    renderResult(data);
+    status.textContent = `Phân tích xong lúc ${new Date().toLocaleTimeString()} — dựa trên ${data.candles.length} nến thật.`;
+  }catch(err){
+    document.getElementById('liveBadge').textContent = 'LỖI';
+    document.getElementById('liveBadge').className = 'badge-live err';
+    status.textContent = `Lỗi: ${err.message}. Kiểm tra lại API key TWELVEDATA_API_KEY trên Vercel (xem file hướng dẫn).`;
+  }finally{
+    btn.disabled = false; btn.innerHTML = '<span class="dot"></span> Phân tích XAU/USD';
+  }
+}
+
+document.querySelectorAll('.tf-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    runAnalysis();
+  });
+});
+document.getElementById('analyzeBtn').addEventListener('click', runAnalysis);
+</script>
+</body>
+</html>
