@@ -92,6 +92,19 @@
   .badge-live.on{color:var(--up); background:rgba(63,184,120,.12);}
   .badge-live.off{color:var(--text3); background:rgba(255,255,255,.05);}
   .badge-live.err{color:var(--down); background:rgba(224,85,74,.12);}
+
+  .ladder-row{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px; margin-bottom:5px;}
+  .ladder-row.up{background:rgba(63,184,120,.07);}
+  .ladder-row.down{background:rgba(224,85,74,.07);}
+  .ladder-row.pivot{background:var(--surface2); border:1px dashed var(--border); font-weight:600;}
+  .ladder-label{font-family:var(--font-m); font-size:11px; font-weight:700; width:32px; flex-shrink:0;}
+  .ladder-price{font-family:var(--font-m); font-size:13px; font-weight:600; width:88px; flex-shrink:0;}
+  .ladder-prob{font-family:var(--font-m); font-size:12px; width:52px; flex-shrink:0; text-align:right;}
+  .ladder-conf{font-size:10.5px; padding:2px 7px; border-radius:5px; flex-shrink:0;}
+  .conf-cao{color:var(--gold); background:var(--gold-glow);}
+  .conf-trung{color:var(--text2); background:rgba(255,255,255,.06);}
+  .conf-thap{color:var(--text3); background:rgba(255,255,255,.03);}
+  .ladder-note{font-size:10.5px; color:var(--text3); line-height:1.4; flex:1;}
 </style>
 </head>
 <body>
@@ -158,6 +171,14 @@
         <div class="ind-card"><div class="ind-label">Bollinger</div><div class="ind-val" id="bbVal">—</div><span class="ind-tag tag-neutral" id="bbTag">—</span></div>
         <div class="ind-card"><div class="ind-label">Mô hình nến</div><div class="ind-val" id="patternVal" style="font-size:13px;">—</div><span class="ind-tag tag-neutral" id="patternTag">—</span></div>
         <div class="ind-card"><div class="ind-label">Đa khung</div><div class="ind-val" id="mtfVal" style="font-size:13px;">—</div><span class="ind-tag tag-neutral" id="mtfTag">—</span></div>
+      </div>
+
+      <div class="panel" style="margin-top:18px;">
+        <div class="panel-title">Nhận định xu hướng &amp; Bản đồ giá</div>
+        <div id="priceMapNarrative" style="font-size:12.5px; color:var(--text2); line-height:1.6; margin-bottom:14px;">
+          Bấm "Phân tích" để hệ thống tính các mức giá tham chiếu và xác suất tương ứng.
+        </div>
+        <div id="priceLadder"></div>
       </div>
 
       <div class="panel" style="margin-top:18px;">
@@ -648,6 +669,51 @@ function renderResult(data){
   } else {
     poBox.style.display = 'none';
   }
+
+  renderPriceLadder(data.price_map);
+}
+
+function confClass(label){
+  if(label==='Cao') return 'conf-cao';
+  if(label==='Trung binh' || label==='Trung bình') return 'conf-trung';
+  return 'conf-thap';
+}
+
+function renderPriceLadder(pm){
+  const narrativeEl = document.getElementById('priceMapNarrative');
+  const ladderEl = document.getElementById('priceLadder');
+  if(!pm){
+    narrativeEl.textContent = 'Chưa đủ dữ liệu lịch sử để tính bản đồ giá cho khung này.';
+    ladderEl.innerHTML = '';
+    return;
+  }
+  narrativeEl.textContent = pm.narrative;
+  ladderEl.innerHTML = '';
+
+  function row(level, direction){
+    const div = document.createElement('div');
+    div.className = `ladder-row ${direction}`;
+    const probText = level.already_passed ? '—' : (level.probability!=null ? `${level.probability}%` : '—');
+    const confText = level.already_passed ? '' :
+      `<span class="ladder-conf ${confClass(level.reaction_confidence)}">${level.reaction_confidence}</span>`;
+    div.innerHTML = `
+      <span class="ladder-label" style="color:${direction==='up'?'var(--up)':'var(--down)'}">${level.label}</span>
+      <span class="ladder-price">${level.price.toFixed(2)}</span>
+      <span class="ladder-prob">${probText}</span>
+      ${confText}
+      <span class="ladder-note">${level.reaction_note}</span>`;
+    ladderEl.appendChild(div);
+  }
+
+  [...pm.up_levels].reverse().forEach(l => row(l, 'up'));
+
+  const pivotRow = document.createElement('div');
+  pivotRow.className = 'ladder-row pivot';
+  pivotRow.innerHTML = `<span class="ladder-label">P</span><span class="ladder-price">${pm.pivot.toFixed(2)}</span>
+    <span class="ladder-note">Đường Pivot trung tâm — giá trên đường này thiên tăng, dưới thiên giảm.</span>`;
+  ladderEl.appendChild(pivotRow);
+
+  pm.down_levels.forEach(l => row(l, 'down'));
 }
 
 async function runAnalysis(){
