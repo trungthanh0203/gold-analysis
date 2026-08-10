@@ -54,28 +54,51 @@ from statistics import mean, pstdev
 TD_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "")
 TD_URL = "https://api.twelvedata.com/time_series"
 
-INTERVAL_MAP = {
-    "M5": "5min", "M15": "15min", "H1": "1h",
-    "H4": "4h", "D1": "1day", "W1": "1week",
+# TwelveData KHONG ho tro thang do "3min" truc tiep (danh sach ho tro: 1min,
+# 5min, 15min, 30min, 45min, 1h, 2h, 4h, 8h, 1day, 1week, 1month). Vi vay M3
+# duoc TU XAY DUNG bang cach lay du lieu 1min that roi GOP moi 3 nen lai
+# thanh 1 nen 3 phut (aggregation) - van la du lieu that 100%, khong noi suy.
+BASE_INTERVAL = {
+    "M3": "1min", "M5": "5min", "M15": "15min", "M30": "30min",
+    "H1": "1h", "H4": "4h", "D1": "1day", "W1": "1week",
 }
+AGGREGATE_FACTOR = {"M3": 3}  # cac khung khac = 1 (khong gop)
+INTERVAL_MAP = BASE_INTERVAL  # giu ten cu de tuong thich cho phan validate timeframe
 OUTPUT_SIZE = {
-    "M5": 250, "M15": 250, "H1": 250, "H4": 250, "D1": 260, "W1": 200,
+    "M3": 750,  # can nhieu nen 1min hon vi se gop 3 nen -> 1
+    "M5": 250, "M15": 250, "M30": 250, "H1": 250, "H4": 250, "D1": 260, "W1": 200,
 }
 HIGHER_TF = {
-    "M5": "H1", "M15": "H4", "H1": "H4", "H4": "D1", "D1": "W1", "W1": None,
+    "M3": "M30", "M5": "H1", "M15": "H4", "M30": "H4",
+    "H1": "H4", "H4": "D1", "D1": "W1", "W1": None,
 }
-SHORT_TFS = {"M5", "M15", "H1"}
+SHORT_TFS = {"M3", "M5", "M15", "M30", "H1"}
 LONG_TFS = {"H4", "D1", "W1"}
 
 
 # ---------------------------------------------------------------------------
-# 1. Lay du lieu that tu TwelveData
+# 1. Lay du lieu that tu TwelveData (+ tu gop nen cho M3)
 # ---------------------------------------------------------------------------
+def aggregate_candles(candles, group_size):
+    """Gop N nen lien tiep thanh 1 nen lon hon (dung cho M3 = gop 3 nen 1min)."""
+    grouped = []
+    for i in range(0, len(candles) - group_size + 1, group_size):
+        chunk = candles[i:i + group_size]
+        grouped.append({
+            "time": chunk[0]["time"],
+            "open": chunk[0]["open"],
+            "high": max(c["high"] for c in chunk),
+            "low": min(c["low"] for c in chunk),
+            "close": chunk[-1]["close"],
+        })
+    return grouped
+
+
 def fetch_series(symbol: str, timeframe: str, size: int = None):
-    interval = INTERVAL_MAP.get(timeframe, "1h")
+    base_interval = BASE_INTERVAL.get(timeframe, "1h")
     size = size or OUTPUT_SIZE.get(timeframe, 200)
     params = {
-        "symbol": symbol, "interval": interval,
+        "symbol": symbol, "interval": base_interval,
         "outputsize": str(size), "order": "ASC", "apikey": TD_API_KEY,
     }
     url = TD_URL + "?" + urllib.parse.urlencode(params)
@@ -84,11 +107,17 @@ def fetch_series(symbol: str, timeframe: str, size: int = None):
         data = json.loads(resp.read().decode())
     if "values" not in data:
         raise RuntimeError(str(data.get("message") or data.get("code") or "Loi khong xac dinh tu TwelveData"))
-    return [
+    candles = [
         {"time": v["datetime"], "open": float(v["open"]), "high": float(v["high"]),
          "low": float(v["low"]), "close": float(v["close"])}
         for v in data["values"]
     ]
+    factor = AGGREGATE_FACTOR.get(timeframe, 1)
+    if factor > 1:
+        candles = aggregate_candles(candles, factor)
+    return candles
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +306,7 @@ def fibonacci_position(candles, lookback=50):
     proximity = abs(nearest_val - last_close) / diff
     return {"nearest_level": nearest_name, "nearest_value": round(nearest_val, 2),
             "proximity": round(proximity, 4), "swing_high": round(swing_high, 2),
-            "swing_low": round(swing_low, 2)}
+            "swing_low": round(swing_low, 2), "levels": {k: round(v, 2) for k, v in levels.items()}}
 
 
 # ---------------------------------------------------------------------------
@@ -354,10 +383,9 @@ def market_structure_bos_choch(candles, pivots):
     return {"label": "Cau truc thi truong hien chua co tin hieu BOS/CHoCH ro ret.", "direction": 0}
 
 
-def fair_value_gap(candles, lookback=40):
-    """FVG: khoang trong gia giua nen 1 va nen 3 (nen 2 khong lap day) -
-    theo SMC day thuong la vung gia se quay lai 'lap day' truoc khi tiep
-    tuc di theo huong cu."""
+def find_all_fvg(candles, lookback=40):
+    """Tra ve TAT CA cac Fair Value Gap trong pham vi lookback (dung chung
+    cho ca viec cham diem tin hieu lan goi y lenh cho)."""
     window = candles[-lookback:] if len(candles) >= lookback else candles
     gaps = []
     for i in range(len(window) - 2):
@@ -366,6 +394,14 @@ def fair_value_gap(candles, lookback=40):
             gaps.append({"type": "bullish", "top": c3["low"], "bottom": c1["high"]})
         elif c1["low"] > c3["high"]:
             gaps.append({"type": "bearish", "top": c1["low"], "bottom": c3["high"]})
+    return gaps
+
+
+def fair_value_gap(candles, lookback=40):
+    """FVG: khoang trong gia giua nen 1 va nen 3 (nen 2 khong lap day) -
+    theo SMC day thuong la vung gia se quay lai 'lap day' truoc khi tiep
+    tuc di theo huong cu."""
+    gaps = find_all_fvg(candles, lookback)
     if not gaps:
         return {"label": "Khong phat hien Fair Value Gap dang chu y trong du lieu gan day.", "direction": 0}
     nearest = gaps[-1]
@@ -377,6 +413,74 @@ def fair_value_gap(candles, lookback=40):
     if inside and nearest["type"] == "bearish":
         return {"label": f"Gia dang trong vung Fair Value Gap giam ({zone}) -> tiem nang khang cu ky thuat.", "direction": -1}
     return {"label": f"FVG {nearest['type']} gan nhat o vung {zone}, gia chua quay lai test.", "direction": 0}
+
+
+# ---------------------------------------------------------------------------
+# 5c. Goi y lenh cho (Buy/Sell Limit/Stop) tu hop luu Fibonacci + FVG
+# ---------------------------------------------------------------------------
+def pending_order_suggestion(candles, score):
+    """Ket hop vung Fibonacci 'golden zone' (38.2%-61.8%) voi Fair Value Gap
+    de goi y 1 lenh CHO cu the (gia vao, SL, TP) thay vi chi bao huong
+    chung chung. Neu gia da o sat vung dinh/day song gan nhat, uu tien goi
+    y lenh BREAKOUT (Stop); neu chua, uu tien lenh CHO GIA HOI VE (Limit)
+    tai vung hop luu Fibonacci + FVG neu tim thay, hoac tai muc Fibonacci
+    thuan neu khong co FVG trung khop."""
+    fib = fibonacci_position(candles, 50)
+    if not fib:
+        return None
+    bias = 1 if score > 0 else (-1 if score < 0 else 0)
+    if bias == 0:
+        return None
+
+    last_close = candles[-1]["close"]
+    swing_high, swing_low = fib["swing_high"], fib["swing_low"]
+    extension = swing_high - swing_low
+    if extension <= 0:
+        return None
+    gaps = find_all_fvg(candles, 40)
+    golden_low, golden_high = fib["levels"]["61.8%"], fib["levels"]["38.2%"]
+
+    if bias > 0:
+        if last_close >= swing_high * 0.998:
+            entry = round(swing_high * 1.0015, 2)
+            sl = round(swing_high - extension * 0.25, 2)
+            tp = round(entry + extension, 2)
+            return {"order_type": "Buy Stop", "entry": entry, "sl": sl, "tp": tp,
+                    "reason": f"Gia dang o sat dinh song gan nhat ({swing_high}) trong xu huong tang -> cho gia XAC NHAN pha vo bang lenh Buy Stop phia tren, tranh vao som khi chua breakout that."}
+        matched = [g for g in gaps if g["type"] == "bullish" and g["bottom"] <= golden_high and g["top"] >= golden_low]
+        if matched:
+            g = matched[-1]
+            entry = round((g["top"] + g["bottom"]) / 2, 2)
+            sl = round(g["bottom"] - extension * 0.1, 2)
+            tp = round(swing_high, 2)
+            return {"order_type": "Buy Limit", "entry": entry, "sl": sl, "tp": tp,
+                    "reason": f"Vung hop luu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trung voi Fair Value Gap tang ({g['bottom']}-{g['top']}) -> dat lenh Buy Limit cho gia hoi ve day truoc khi tiep tuc tang."}
+        entry = golden_low  # muc 61.8% - vung hoi sau, an toan hon
+        sl = round(swing_low - extension * 0.1, 2)
+        tp = round(swing_high, 2)
+        return {"order_type": "Buy Limit", "entry": entry, "sl": sl, "tp": tp,
+                "reason": f"Chua tim thay Fair Value Gap trung khop, dat lenh Buy Limit tai muc Fibonacci 61.8% ({entry}) - vung hoi thoai lui pho bien truoc khi tiep dien xu huong tang."}
+
+    # bias < 0 (xu huong giam)
+    if last_close <= swing_low * 1.002:
+        entry = round(swing_low * 0.9985, 2)
+        sl = round(swing_low + extension * 0.25, 2)
+        tp = round(entry - extension, 2)
+        return {"order_type": "Sell Stop", "entry": entry, "sl": sl, "tp": tp,
+                "reason": f"Gia dang o sat day song gan nhat ({swing_low}) trong xu huong giam -> cho gia XAC NHAN pha vo bang lenh Sell Stop phia duoi, tranh vao som khi chua breakout that."}
+    matched = [g for g in gaps if g["type"] == "bearish" and g["bottom"] <= golden_high and g["top"] >= golden_low]
+    if matched:
+        g = matched[-1]
+        entry = round((g["top"] + g["bottom"]) / 2, 2)
+        sl = round(g["top"] + extension * 0.1, 2)
+        tp = round(swing_low, 2)
+        return {"order_type": "Sell Limit", "entry": entry, "sl": sl, "tp": tp,
+                "reason": f"Vung hop luu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trung voi Fair Value Gap giam ({g['bottom']}-{g['top']}) -> dat lenh Sell Limit cho gia hoi len vung nay truoc khi tiep tuc giam."}
+    entry = golden_high  # muc 38.2% - vung hoi nong hon, gia ban cao hon
+    sl = round(swing_high + extension * 0.1, 2)
+    tp = round(swing_low, 2)
+    return {"order_type": "Sell Limit", "entry": entry, "sl": sl, "tp": tp,
+            "reason": f"Chua tim thay Fair Value Gap trung khop, dat lenh Sell Limit tai muc Fibonacci 38.2% ({entry}) - vung hoi len pho bien truoc khi tiep dien xu huong giam."}
 
 
 def liquidity_sweep(candles, lookback=30, check_recent=5):
@@ -718,12 +822,15 @@ class handler(BaseHTTPRequestHandler):
                         "low_confidence": stats["samples"] < 15,
                     }
 
+            pending_order = pending_order_suggestion(candles, signal["score"])
+
             self._send(200, {
                 "timeframe": timeframe,
                 "candles": candles[-150:],
                 "moving_averages": ma_lines,
                 "signal": signal,
                 "backtest": backtest_info,
+                "pending_order": pending_order,
             })
         except Exception as e:
             self._send(502, {"error": f"Loi lay du lieu tu TwelveData: {e}"})
