@@ -85,6 +85,17 @@ def sma(vals, period):
     return mean(vals[-period:]) if len(vals) >= period else None
 
 
+def sma_series(vals, period):
+    """Tra ve MA CA CHUOI (khong chi 1 gia tri cuoi) de ve duong len chart."""
+    out = []
+    for i in range(len(vals)):
+        if i + 1 < period:
+            out.append(None)
+        else:
+            out.append(round(mean(vals[i - period + 1:i + 1]), 2))
+    return out
+
+
 def ema_series(vals, period):
     if len(vals) < period:
         return []
@@ -524,7 +535,20 @@ class handler(BaseHTTPRequestHandler):
                 higher_tf_info = higher_timeframe_trend(higher_label, higher_candles)
 
             signal = build_signal(timeframe, candles, higher_tf_info)
-            self._send(200, {"timeframe": timeframe, "candles": candles[-150:], "signal": signal})
+
+            closes_all = [c["close"] for c in candles]
+            ma_lines = {
+                "ma14": sma_series(closes_all, 14)[-150:],
+                "ma34": sma_series(closes_all, 34)[-150:],
+                "ma100": sma_series(closes_all, 100)[-150:],
+            }
+
+            self._send(200, {
+                "timeframe": timeframe,
+                "candles": candles[-150:],
+                "moving_averages": ma_lines,
+                "signal": signal,
+            })
         except Exception as e:
             self._send(502, {"error": f"Loi lay du lieu tu TwelveData: {e}"})
 
