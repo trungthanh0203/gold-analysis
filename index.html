@@ -46,7 +46,9 @@
   .panel{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; margin-bottom:18px;}
   .panel-title{font-family:var(--font-d); font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:14px; display:flex; align-items:center; gap:8px; justify-content:space-between;}
 
-  canvas{display:block; width:100%; height:380px;}
+  canvas{display:block; width:100%; height:380px; cursor:grab; touch-action:none;}
+  .chart-tool-btn{width:26px; height:26px; border-radius:6px; background:var(--surface2); border:1px solid var(--border); color:var(--text2); font-family:var(--font-m); font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;}
+  .chart-tool-btn:hover{color:var(--text); border-color:var(--text3);}
 
   .indicator-strip{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
   @media (max-width:600px){ .indicator-strip{grid-template-columns:repeat(2,1fr);} }
@@ -136,7 +138,15 @@
           <span><span style="display:inline-block;width:10px;height:2px;background:#B187E8;margin-right:5px;vertical-align:middle;"></span>MA34</span>
           <span><span style="display:inline-block;width:10px;height:2px;background:#D9A94E;margin-right:5px;vertical-align:middle;"></span>MA100</span>
         </div>
-        <canvas id="chart"></canvas>
+        <div style="position:relative;">
+          <canvas id="chart"></canvas>
+          <div style="position:absolute; top:6px; right:6px; display:flex; gap:4px;">
+            <button class="chart-tool-btn" id="zoomInBtn" title="Phóng to">+</button>
+            <button class="chart-tool-btn" id="zoomOutBtn" title="Thu nhỏ">−</button>
+            <button class="chart-tool-btn" id="resetZoomBtn" title="Xem tất cả">⤢</button>
+          </div>
+          <div id="ohlcInfo" style="position:absolute; top:6px; left:6px; font-family:var(--font-m); font-size:11px; color:var(--text2); background:rgba(21,21,25,.85); padding:4px 8px; border-radius:6px; border:1px solid var(--border); display:none;"></div>
+        </div>
       </div>
 
       <div class="indicator-strip">
@@ -209,7 +219,28 @@ const API_PATH = "/api/analyze";
 const canvas = document.getElementById('chart');
 const ctx = canvas.getContext('2d');
 
-function drawChart(candles, maLines, overlay){
+// ================== STATE CHO ZOOM / PAN / CROSSHAIR ==================
+const chartState = {
+  allCandles: [], allMa: null, overlay: null,
+  viewStart: 0, viewCount: 80,
+  hoverX: null, hoverY: null,
+};
+const MIN_VIEW = 20;
+const DEFAULT_VIEW = 80;
+
+function clampView(){
+  const total = chartState.allCandles.length;
+  chartState.viewCount = Math.max(MIN_VIEW, Math.min(chartState.viewCount, total));
+  chartState.viewStart = Math.max(0, Math.min(chartState.viewStart, total - chartState.viewCount));
+}
+
+function redraw(){
+  if(!chartState.allCandles.length) return;
+  clampView();
+  drawChart();
+}
+
+function drawChart(){
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
@@ -217,22 +248,34 @@ function drawChart(candles, maLines, overlay){
   ctx.setTransform(dpr,0,0,dpr,0,0);
   const W = rect.width, H = 380;
   ctx.clearRect(0,0,W,H);
-  if(!candles || candles.length===0) return;
+
+  const total = chartState.allCandles.length;
+  if(total === 0) return;
+  const s = chartState.viewStart, cnt = chartState.viewCount, e = s + cnt;
+  const candles = chartState.allCandles.slice(s, e);
+  const maAll = chartState.allMa;
+  const maLines = maAll ? {
+    ma14: maAll.ma14 ? maAll.ma14.slice(s,e) : null,
+    ma34: maAll.ma34 ? maAll.ma34.slice(s,e) : null,
+    ma100: maAll.ma100 ? maAll.ma100.slice(s,e) : null,
+  } : null;
+  const overlay = chartState.overlay;
+  const isLastVisible = e >= total;
+
+  if(candles.length === 0) return;
 
   const highs = candles.map(c=>c.high), lows = candles.map(c=>c.low);
   let max = Math.max(...highs), min = Math.min(...lows);
-  if(overlay){
-    [overlay.entry, overlay.sl, overlay.tp].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} });
-  }
+  if(overlay){ [overlay.entry, overlay.sl, overlay.tp].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} }); }
   const pad = (max-min)*0.1 || 1;
   const top = max+pad, bottom = min-pad;
   const yScale = v => H - ((v-bottom)/(top-bottom))*H;
+  const cw = W/candles.length;
 
   ctx.strokeStyle = '#202026'; ctx.lineWidth = 1;
   for(let i=0;i<=4;i++){ const y=(H/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-  const cw = W/candles.length;
-  const bodyW = Math.max(cw*0.55, 1.5);
+  const bodyW = Math.max(cw*0.55, 1);
   candles.forEach((c,i)=>{
     const x = i*cw + cw/2;
     const up = c.close >= c.open;
@@ -245,7 +288,6 @@ function drawChart(candles, maLines, overlay){
     ctx.fillRect(x-bodyW/2, Math.min(yO,yC), bodyW, bh);
   });
 
-  // ---- Duong MA14 / MA34 / MA100 ----
   function drawMaLine(values, color){
     if(!values) return;
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
@@ -257,13 +299,8 @@ function drawChart(candles, maLines, overlay){
     });
     if(started) ctx.stroke();
   }
-  if(maLines){
-    drawMaLine(maLines.ma100, '#D9A94E');
-    drawMaLine(maLines.ma34, '#B187E8');
-    drawMaLine(maLines.ma14, '#5EC8E8');
-  }
+  if(maLines){ drawMaLine(maLines.ma100,'#D9A94E'); drawMaLine(maLines.ma34,'#B187E8'); drawMaLine(maLines.ma14,'#5EC8E8'); }
 
-  // ---- Cac muc Entry / SL / TP ----
   if(overlay){
     const levels = [
       {v:overlay.entry, color:'#EDEDEF', label:'Entry'},
@@ -274,39 +311,172 @@ function drawChart(candles, maLines, overlay){
       if(lv.v==null) return;
       const y = yScale(lv.v);
       ctx.strokeStyle = lv.color; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
-      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = lv.color; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'left';
       ctx.fillText(`${lv.label} ${lv.v.toFixed(2)}`, 6, y-4);
     });
 
-    // ---- Mui ten tin hieu tai nen cuoi ----
-    const lastX = (candles.length-1)*cw + cw/2;
-    const lastC = candles[candles.length-1];
-    if(overlay.dir > 0){
-      const y = yScale(lastC.low) + 18;
-      ctx.fillStyle = '#3FB878';
-      ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y-12); ctx.closePath(); ctx.fill();
-      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
-      ctx.fillText(`${overlay.verdict} (+${overlay.score})`, lastX, y+16);
-    } else if(overlay.dir < 0){
-      const y = yScale(lastC.high) - 18;
-      ctx.fillStyle = '#E0554A';
-      ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y+12); ctx.closePath(); ctx.fill();
-      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
-      ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-8);
-    } else {
-      const y = yScale(lastC.close);
-      ctx.fillStyle = '#9B9AA3';
-      ctx.beginPath(); ctx.arc(lastX, y, 4, 0, Math.PI*2); ctx.fill();
-      ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
-      ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-12);
+    if(isLastVisible){
+      const lastX = (candles.length-1)*cw + cw/2;
+      const lastC = candles[candles.length-1];
+      if(overlay.dir > 0){
+        const y = yScale(lastC.low) + 18;
+        ctx.fillStyle = '#3FB878';
+        ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y-12); ctx.closePath(); ctx.fill();
+        ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+        ctx.fillText(`${overlay.verdict} (+${overlay.score})`, lastX, y+16);
+      } else if(overlay.dir < 0){
+        const y = yScale(lastC.high) - 18;
+        ctx.fillStyle = '#E0554A';
+        ctx.beginPath(); ctx.moveTo(lastX-7,y); ctx.lineTo(lastX+7,y); ctx.lineTo(lastX,y+12); ctx.closePath(); ctx.fill();
+        ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+        ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-8);
+      } else {
+        const y = yScale(lastC.close);
+        ctx.fillStyle = '#9B9AA3';
+        ctx.beginPath(); ctx.arc(lastX, y, 4, 0, Math.PI*2); ctx.fill();
+        ctx.textAlign = 'center'; ctx.font = '11px Space Grotesk, sans-serif';
+        ctx.fillText(`${overlay.verdict} (${overlay.score})`, lastX, y-12);
+      }
     }
   }
 
   ctx.fillStyle = '#5F5E67'; ctx.font = '11px JetBrains Mono, monospace'; ctx.textAlign = 'right';
   for(let i=0;i<=4;i++){ const val = top - ((top-bottom)/4)*i; ctx.fillText(val.toFixed(1), W-6, (H/4)*i + 12); }
+
+  // ---- Crosshair (giong TradingView) ----
+  const ohlcBox = document.getElementById('ohlcInfo');
+  if(chartState.hoverX != null && chartState.hoverX >= 0 && chartState.hoverX <= W){
+    const idx = Math.min(candles.length-1, Math.max(0, Math.floor(chartState.hoverX / cw)));
+    const c = candles[idx];
+    const x = idx*cw + cw/2;
+
+    ctx.strokeStyle = '#5F5E67'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+    if(chartState.hoverY != null){
+      ctx.beginPath(); ctx.moveTo(0,chartState.hoverY); ctx.lineTo(W,chartState.hoverY); ctx.stroke();
+      const hoverPrice = bottom + (H-chartState.hoverY)/H*(top-bottom);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#151519'; ctx.fillRect(W-70, chartState.hoverY-9, 64, 18);
+      ctx.strokeStyle = '#5F5E67'; ctx.strokeRect(W-70, chartState.hoverY-9, 64, 18);
+      ctx.fillStyle = '#EDEDEF'; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'center';
+      ctx.fillText(hoverPrice.toFixed(2), W-38, chartState.hoverY+3);
+    }
+    ctx.setLineDash([]);
+
+    ohlcBox.style.display = 'block';
+    ohlcBox.innerHTML = `${new Date(c.time || Date.now()).toLocaleString?.() || ''} `
+      + `<span style="color:var(--text)">O</span> ${c.open.toFixed(2)} `
+      + `<span style="color:var(--text)">H</span> ${c.high.toFixed(2)} `
+      + `<span style="color:var(--text)">L</span> ${c.low.toFixed(2)} `
+      + `<span style="color:var(--text)">C</span> ${c.close.toFixed(2)}`;
+  } else {
+    ohlcBox.style.display = 'none';
+  }
 }
+
+// ================== TUONG TAC: ZOOM (WHEEL) / PAN (KEO CHUOT) / CROSSHAIR ==================
+let isDragging = false, dragStartX = 0, dragStartViewStart = 0;
+
+canvas.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  if(!chartState.allCandles.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const cwNow = rect.width / chartState.viewCount;
+  const idxUnderCursor = chartState.viewStart + mouseX / cwNow;
+  const zoomFactor = e.deltaY < 0 ? 0.88 : 1/0.88; // scroll len = zoom in
+  let newCount = Math.round(chartState.viewCount * zoomFactor);
+  newCount = Math.max(MIN_VIEW, Math.min(newCount, chartState.allCandles.length));
+  const relPos = mouseX / rect.width;
+  chartState.viewStart = Math.round(idxUnderCursor - relPos*newCount);
+  chartState.viewCount = newCount;
+  redraw();
+}, {passive:false});
+
+canvas.addEventListener('mousedown', (e)=>{
+  isDragging = true; dragStartX = e.clientX; dragStartViewStart = chartState.viewStart;
+  canvas.style.cursor = 'grabbing';
+});
+window.addEventListener('mousemove', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  if(isDragging){
+    const cwNow = rect.width / chartState.viewCount;
+    const deltaCandles = Math.round((e.clientX - dragStartX) / cwNow);
+    chartState.viewStart = dragStartViewStart - deltaCandles;
+    redraw();
+  }
+});
+window.addEventListener('mouseup', ()=>{ isDragging = false; canvas.style.cursor = 'grab'; });
+
+canvas.addEventListener('mousemove', (e)=>{
+  if(isDragging) return;
+  const rect = canvas.getBoundingClientRect();
+  chartState.hoverX = e.clientX - rect.left;
+  chartState.hoverY = e.clientY - rect.top;
+  redraw();
+});
+canvas.addEventListener('mouseleave', ()=>{
+  chartState.hoverX = null; chartState.hoverY = null;
+  redraw();
+});
+canvas.addEventListener('dblclick', ()=>{
+  chartState.viewStart = Math.max(0, chartState.allCandles.length - DEFAULT_VIEW);
+  chartState.viewCount = Math.min(DEFAULT_VIEW, chartState.allCandles.length);
+  redraw();
+});
+
+// ---- Cham tay (touch): 1 ngon = keo, 2 ngon = pinch zoom ----
+let touchMode = null, touchStartX = 0, touchStartViewStart = 0, pinchStartDist = 0, pinchStartCount = 0;
+
+canvas.addEventListener('touchstart', (e)=>{
+  if(e.touches.length === 1){
+    touchMode = 'pan'; touchStartX = e.touches[0].clientX; touchStartViewStart = chartState.viewStart;
+  } else if(e.touches.length === 2){
+    touchMode = 'pinch';
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStartDist = Math.sqrt(dx*dx + dy*dy);
+    pinchStartCount = chartState.viewCount;
+  }
+}, {passive:true});
+
+canvas.addEventListener('touchmove', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  if(touchMode === 'pan' && e.touches.length === 1){
+    const cwNow = rect.width / chartState.viewCount;
+    const deltaCandles = Math.round((e.touches[0].clientX - touchStartX) / cwNow);
+    chartState.viewStart = touchStartViewStart - deltaCandles;
+    redraw();
+  } else if(touchMode === 'pinch' && e.touches.length === 2){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const ratio = pinchStartDist / dist;
+    let newCount = Math.round(pinchStartCount * ratio);
+    newCount = Math.max(MIN_VIEW, Math.min(newCount, chartState.allCandles.length));
+    chartState.viewCount = newCount;
+    redraw();
+  }
+  e.preventDefault();
+}, {passive:false});
+
+canvas.addEventListener('touchend', ()=>{ touchMode = null; });
+
+// ---- Nut cong cu zoom ----
+document.getElementById('zoomInBtn').addEventListener('click', ()=>{
+  chartState.viewCount = Math.max(MIN_VIEW, Math.round(chartState.viewCount*0.7));
+  redraw();
+});
+document.getElementById('zoomOutBtn').addEventListener('click', ()=>{
+  chartState.viewCount = Math.min(chartState.allCandles.length, Math.round(chartState.viewCount/0.7));
+  redraw();
+});
+document.getElementById('resetZoomBtn').addEventListener('click', ()=>{
+  chartState.viewStart = Math.max(0, chartState.allCandles.length - DEFAULT_VIEW);
+  chartState.viewCount = Math.min(DEFAULT_VIEW, chartState.allCandles.length);
+  redraw();
+});
 
 function tagClass(v){ return v>0?'tag-buy':(v<0?'tag-sell':'tag-neutral'); }
 function tagText(v){ return v>0?'Mua':(v<0?'Bán':'Trung lập'); }
@@ -331,7 +501,13 @@ function renderResult(data){
     };
   }
 
-  drawChart(candles, data.moving_averages, overlay);
+  chartState.allCandles = candles;
+  chartState.allMa = data.moving_averages || null;
+  chartState.overlay = overlay;
+  chartState.viewStart = Math.max(0, candles.length - DEFAULT_VIEW);
+  chartState.viewCount = Math.min(DEFAULT_VIEW, candles.length);
+  chartState.hoverX = null; chartState.hoverY = null;
+  redraw();
   document.getElementById('tfLabel').textContent = data.timeframe;
   document.getElementById('liveBadge').textContent = 'DỮ LIỆU THẬT · TWELVEDATA';
   document.getElementById('liveBadge').className = 'badge-live on';
@@ -438,6 +614,7 @@ document.querySelectorAll('.tf-btn').forEach(btn=>{
   });
 });
 document.getElementById('analyzeBtn').addEventListener('click', runAnalysis);
+window.addEventListener('resize', ()=> redraw());
 </script>
 </body>
 </html>
