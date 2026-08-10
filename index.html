@@ -308,6 +308,10 @@ function drawChart(){
   if(overlay){
     [overlay.entry, overlay.sl, overlay.tp].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} });
     if(overlay.pending){ [overlay.pending.entry, overlay.pending.sl, overlay.pending.tp].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} }); }
+    if(overlay.priceMap){
+      const pm = overlay.priceMap;
+      [pm.pivot, ...pm.up_levels.map(l=>l.price), ...pm.down_levels.map(l=>l.price)].forEach(v=>{ if(v!=null){ max=Math.max(max,v); min=Math.min(min,v);} });
+    }
   }
   const pad = (max-min)*0.1 || 1;
   const top = max+pad, bottom = min-pad;
@@ -372,6 +376,23 @@ function drawChart(){
         ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
         ctx.fillStyle = lv.color; ctx.font = 'bold 10px JetBrains Mono, monospace'; ctx.textAlign = 'right';
         ctx.fillText(`${lv.label} ${lv.v.toFixed(2)}`, W-76, y-4);
+      });
+    }
+
+    if(overlay.priceMap){
+      const pm = overlay.priceMap;
+      const pmColor = '#7C8CB0';
+      const allPmLevels = [
+        ...pm.up_levels.map(l=>({v:l.price, label:l.label})),
+        {v:pm.pivot, label:'P'},
+        ...pm.down_levels.map(l=>({v:l.price, label:l.label})),
+      ];
+      allPmLevels.forEach(lv=>{
+        const y = yScale(lv.v);
+        ctx.strokeStyle = pmColor; ctx.lineWidth = 1; ctx.setLineDash(lv.label==='P' ? [2,3] : [1,3]);
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = pmColor; ctx.font = '9px JetBrains Mono, monospace'; ctx.textAlign = 'left';
+        ctx.fillText(`${lv.label}`, W-24, y-3);
       });
     }
 
@@ -558,6 +579,7 @@ function renderResult(data){
       tp: dir!==0 ? last.close + dir*risk*2 : null,
       dir, verdict: sig.verdict, score: sig.score,
       pending: data.pending_order || null,
+      priceMap: data.price_map || null,
     };
   }
 
