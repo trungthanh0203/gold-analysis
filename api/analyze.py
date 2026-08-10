@@ -268,19 +268,14 @@ def compute_atr_series(candles, period=14):
     return atr
 
 
-def classic_pivot_points(candles):
-    """Pivot Point kinh dien (Floor Trader Pivots) tinh tu nen truoc do da
-    dong cua - cho ra dung 3 muc khang cu (R1-R3) va 3 muc ho tro (S1-S3)."""
+def pivot_center(candles):
+    """Duong Pivot trung tam, tinh tu H/L/C cua nen truoc do da dong cua -
+    dung lam moc quy chieu 'tren/duoi thien tang/giam'."""
     if len(candles) < 2:
         return None
     ref = candles[-2]
     H, L, C = ref["high"], ref["low"], ref["close"]
-    P = (H + L + C) / 3
-    R1, S1 = 2 * P - L, 2 * P - H
-    R2, S2 = P + (H - L), P - (H - L)
-    R3, S3 = H + 2 * (P - L), L - 2 * (H - P)
-    return {"pivot": round(P, 2), "R1": round(R1, 2), "R2": round(R2, 2), "R3": round(R3, 2),
-            "S1": round(S1, 2), "S2": round(S2, 2), "S3": round(S3, 2)}
+    return round((H + L + C) / 3, 2)
 
 
 def empirical_move_distribution(candles, lookahead=20):
@@ -332,23 +327,39 @@ def confluence_check(level_price, fib, bb_upper, bb_lower, fvg_zones, tolerance_
 
 
 def reaction_label(matches):
+    """Danh gia kha nang gia TIEP DIEN (di xuyen qua) hay DAO CHIEU/giang co
+    tai 1 muc gia cu the, dua tren so vung ky thuat khac trung khop."""
     if len(matches) >= 2:
-        return "Cao", f"Trung voi {', '.join(matches)} -> nhieu kha nang co phan ung dao chieu/giang co tai day."
+        return ("Cao", f"Trung voi {', '.join(matches)} -> kha nang cao gia se PHAN UNG (dao chieu hoac "
+                        f"giang co) tai day thay vi di xuyen qua ngay.")
     if len(matches) == 1:
-        return "Trung binh", f"Trung voi {matches[0]} -> co the co phan ung nhung chua chac chan."
-    return "Thap", "Khong trung vung ky thuat dang chu y nao khac -> kha nang gia chi di qua ma khong phan ung manh."
+        return ("Trung binh", f"Trung voi {matches[0]} -> co the co phan ung nhe, nhung cung co kha nang "
+                               f"gia chi giang co roi TIEP DIEN xu huong cu, chua du manh de khang dinh dao chieu.")
+    return ("Thap", "Khong trung vung ky thuat dang chu y nao khac -> nhieu kha nang gia se TIEP DIEN "
+                     "(di xuyen qua muc nay) hon la dao chieu manh tai day.")
 
 
 def build_price_map(candles, signal):
-    pivots = classic_pivot_points(candles)
-    if not pivots or len(candles) < 90:
+    pivot = pivot_center(candles)
+    if pivot is None or len(candles) < 90:
         return None
     up_moves, down_moves, current_atr = empirical_move_distribution(candles, lookahead=20)
+    if not current_atr:
+        return None
     closes = [c["close"] for c in candles]
     fib = fibonacci_position(candles, 50)
     bb_l, bb_m, bb_u = bollinger(closes, 20, 2)
     fvg_zones = find_all_fvg(candles, 40)
     last_close = candles[-1]["close"]
+
+    # Giai cach cac muc theo BOI SO ATR (khong dung H-L cua rieng 1 nen)
+    # de dam bao R1-R2-R3 / S1-S2-S3 LUON tach biet ro theo dung bien dong
+    # thuc te, tranh bi don sat nhau khi nen tham chieu qua yen ang.
+    atr_multiples = {"1": 1.0, "2": 2.0, "3": 3.5}
+    pivots = {"pivot": pivot}
+    for suffix, mult in atr_multiples.items():
+        pivots[f"R{suffix}"] = round(pivot + mult * current_atr, 2)
+        pivots[f"S{suffix}"] = round(pivot - mult * current_atr, 2)
 
     def build_level(name, price, direction):
         if direction == "up" and price <= last_close:
@@ -357,7 +368,7 @@ def build_price_map(candles, signal):
         if direction == "down" and price >= last_close:
             return {"label": name, "price": price, "probability": None, "already_passed": True,
                     "reaction_confidence": "—", "reaction_note": "Gia hien da o duoi muc nay."}
-        dist_atr = abs(price - last_close) / current_atr if current_atr else None
+        dist_atr = abs(price - last_close) / current_atr
         prob = prob_reach(up_moves if direction == "up" else down_moves, dist_atr)
         matches = confluence_check(price, fib, bb_u, bb_l, fvg_zones)
         conf_label, conf_text = reaction_label(matches)
@@ -367,16 +378,17 @@ def build_price_map(candles, signal):
     up_levels = [build_level(n, pivots[n], "up") for n in ("R1", "R2", "R3")]
     down_levels = [build_level(n, pivots[n], "down") for n in ("S1", "S2", "S3")]
 
-    side_text = "TREN" if last_close > pivots["pivot"] else "DUOI"
-    lean_text = "tang" if last_close > pivots["pivot"] else "giam"
+    side_text = "TREN" if last_close > pivot else "DUOI"
+    lean_text = "tang" if last_close > pivot else "giam"
     narrative = (f"He thong da yeu to danh gia xu huong hien tai la {signal['verdict']} "
                  f"(diem hop luu {signal['score']}/100). Gia dang o {side_text} duong pivot trung tam "
-                 f"({pivots['pivot']}), thien ve phia {lean_text} trong ngan han. Cac muc ben duoi la "
-                 f"vung gia tham khao - khong phai diem vao/thoat lenh bat buoc, ban tu can nhac ket hop "
-                 f"voi khau vi rui ro cua minh.")
+                 f"({pivot}), thien ve phia {lean_text} trong ngan han. Cac muc R1-R3/S1-S3 duoc gian cach "
+                 f"theo bien dong thuc te (ATR = {round(current_atr,2)}) nen cang xa gia hien tai thi xac "
+                 f"suat cham toi cang thap. Day la vung gia tham khao - khong phai diem vao/thoat lenh bat "
+                 f"buoc, ban tu can nhac ket hop voi khau vi rui ro cua minh.")
 
-    return {"pivot": pivots["pivot"], "up_levels": up_levels, "down_levels": down_levels,
-            "narrative": narrative, "atr": round(current_atr, 2) if current_atr else None}
+    return {"pivot": pivot, "up_levels": up_levels, "down_levels": down_levels,
+            "narrative": narrative, "atr": round(current_atr, 2)}
 
 
 # ---------------------------------------------------------------------------
