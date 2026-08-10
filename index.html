@@ -44,11 +44,12 @@
   @media (max-width:860px){ .grid{grid-template-columns:1fr;} }
 
   .panel{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; margin-bottom:18px;}
-  .panel-title{font-family:var(--font-d); font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
+  .panel-title{font-family:var(--font-d); font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:14px; display:flex; align-items:center; gap:8px; justify-content:space-between;}
 
   canvas{display:block; width:100%; height:380px;}
 
-  .indicator-strip{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  .indicator-strip{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+  @media (max-width:600px){ .indicator-strip{grid-template-columns:repeat(2,1fr);} }
   .ind-card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px;}
   .ind-label{font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;}
   .ind-val{font-family:var(--font-m); font-size:17px; font-weight:600;}
@@ -138,10 +139,15 @@
         <div class="ind-card"><div class="ind-label">MACD</div><div class="ind-val" id="macdVal">—</div><span class="ind-tag tag-neutral" id="macdTag">—</span></div>
         <div class="ind-card"><div class="ind-label">MA 20/50</div><div class="ind-val" id="maVal">—</div><span class="ind-tag tag-neutral" id="maTag">—</span></div>
         <div class="ind-card"><div class="ind-label">Bollinger</div><div class="ind-val" id="bbVal">—</div><span class="ind-tag tag-neutral" id="bbTag">—</span></div>
+        <div class="ind-card"><div class="ind-label">Mô hình nến</div><div class="ind-val" id="patternVal" style="font-size:13px;">—</div><span class="ind-tag tag-neutral" id="patternTag">—</span></div>
+        <div class="ind-card"><div class="ind-label">Đa khung</div><div class="ind-val" id="mtfVal" style="font-size:13px;">—</div><span class="ind-tag tag-neutral" id="mtfTag">—</span></div>
       </div>
 
       <div class="panel" style="margin-top:18px;">
-        <div class="panel-title">Phân tích &amp; đánh giá — vì sao có tín hiệu này</div>
+        <div class="panel-title">
+          Phân tích &amp; đánh giá — vì sao có tín hiệu này
+          <span class="badge-live off" id="modeBadge" style="margin-left:auto;"></span>
+        </div>
         <div class="reason-list" id="reasonList">
           <div class="reason-item"><div class="reason-dot"></div>Chưa có dữ liệu phân tích. Bấm nút "Phân tích XAU/USD" ở trên.</div>
         </div>
@@ -285,6 +291,8 @@ function renderResult(data){
   setInd('maVal','maTag', v.ma20, 'MA_Trend', (sig.details||{}).MA_Trend>0 ? 'Golden' : 'Death');
   setInd('bbVal','bbTag', v.bb_mid, 'Bollinger',
     (sig.details||{}).Bollinger>0 ? 'Dải dưới' : ((sig.details||{}).Bollinger<0 ? 'Dải trên' : 'Giữa dải'));
+  setInd('patternVal','patternTag', null, 'Candle_Pattern', v.pattern_name || '—');
+  setInd('mtfVal','mtfTag', null, 'Da_khung', v.higher_tf_label || '—');
 
   const reasonList = document.getElementById('reasonList');
   reasonList.innerHTML = '';
@@ -295,6 +303,17 @@ function renderResult(data){
     reasonList.appendChild(item);
   });
   document.getElementById('reasonSummary').textContent = sig.summary || '';
+
+  const modeBadge = document.getElementById('modeBadge');
+  if(v.analysis_mode === 'NGAN_HAN'){
+    modeBadge.textContent = 'NGẮN HẠN · PRICE ACTION + ICHIMOKU';
+    modeBadge.className = 'badge-live on';
+  }else if(v.analysis_mode === 'DAI_HAN'){
+    modeBadge.textContent = 'DÀI HẠN · WYCKOFF/ELLIOTT + DXY';
+    modeBadge.className = 'badge-live on';
+  }else{
+    modeBadge.textContent = '';
+  }
 
   if(candles.length){
     const last = candles[candles.length-1];
