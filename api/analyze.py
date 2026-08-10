@@ -24,6 +24,19 @@ He thong phan tich THICH UNG theo khung thoi gian (dung goi y da thao luan):
       - Lien thi truong: xu huong chi so DXY (dong USD) - vang thuong
         tuong quan NGHICH voi DXY
 
+  MOI KHUNG THOI GIAN cung duoc bo sung 3 yeu to Smart Money Concepts (SMC):
+      - Market Structure BOS/CHoCH (Break of Structure / Change of Character)
+      - Fair Value Gap (FVG) - vung khoang trong gia chua duoc lap day
+      - Liquidity Sweep - phat hien hanh vi quet thanh khoan tai dinh/day cu
+        (LUU Y: day la cai dat heuristic don gian hoa cua SMC, khong thay
+        the viec doc bieu do thu cong theo truong phai SMC chuyen sau)
+
+  NGOAI RA: he thong chay 1 BACKTEST DON GIAN tren chinh du lieu lich su
+  vua lay ve (khong bia so) de tinh ty le % cac lan tin hieu tuong tu
+  (cung huong xu huong MA + cung vung RSI) da di dung huong trong qua
+  khu gan day - giup nguoi dung co them can cu tham khao ve do tin cay,
+  KHONG phai la loi hua ve ket qua tuong lai.
+
 Tat ca duoc cham diem -1/0/+1 va cong lai thanh diem hop luu -100..+100.
 Khong dung pandas/numpy -> khong can requirements.txt -> cold start nhanh.
 
@@ -144,6 +157,70 @@ def bollinger(vals, period=20, mult=2):
 
 
 # ---------------------------------------------------------------------------
+# 2b. Backtest don gian - tinh ty le % tin hieu tuong tu da dung huong
+#     trong qua khu (dung CHINH du lieu that vua lay ve, khong bia so)
+# ---------------------------------------------------------------------------
+def rolling_sma(vals, period):
+    out = [None] * len(vals)
+    for i in range(period - 1, len(vals)):
+        out[i] = mean(vals[i - period + 1:i + 1])
+    return out
+
+
+def rolling_rsi(vals, period=14):
+    out = [None] * len(vals)
+    if len(vals) < period + 1:
+        return out
+    gains, losses = [0.0], [0.0]
+    for i in range(1, len(vals)):
+        d = vals[i] - vals[i - 1]
+        gains.append(max(d, 0)); losses.append(max(-d, 0))
+    avg_gain = avg_loss = None
+    for i in range(period, len(vals)):
+        if avg_gain is None:
+            avg_gain = mean(gains[1:period + 1]); avg_loss = mean(losses[1:period + 1])
+        else:
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        out[i] = 100.0 if avg_loss == 0 else round(100 - (100 / (1 + avg_gain / avg_loss)), 2)
+    return out
+
+
+def backtest_winrate(candles, lookahead=10):
+    """Quet qua toan bo du lieu lich su da lay ve: tai moi diem trong qua
+    khu, kiem tra xem 'thiet lap' (setup) co giong tinh trang hien tai
+    khong (xu huong MA20/50 + vung RSI), roi xem gia co di dung huong sau
+    N nen tiep theo hay khong. Tra ve ty le % thang cho ca 2 chieu MUA/BAN
+    dua tren mau du lieu THAT, khong phai cong thuc suy dien."""
+    closes = [c["close"] for c in candles]
+    n = len(closes)
+    if n < 90:
+        return None
+    ma20s, ma50s, rsis = rolling_sma(closes, 20), rolling_sma(closes, 50), rolling_rsi(closes, 14)
+
+    buy_total = buy_win = sell_total = sell_win = 0
+    for i in range(50, n - lookahead):
+        if ma20s[i] is None or ma50s[i] is None or rsis[i] is None:
+            continue
+        if ma20s[i] > ma50s[i] and 40 <= rsis[i] <= 70:
+            buy_total += 1
+            if closes[i + lookahead] > closes[i]:
+                buy_win += 1
+        elif ma20s[i] < ma50s[i] and 30 <= rsis[i] <= 60:
+            sell_total += 1
+            if closes[i + lookahead] < closes[i]:
+                sell_win += 1
+
+    result = {}
+    if buy_total > 0:
+        result["buy"] = {"win_rate": round(buy_win / buy_total * 100, 1), "samples": buy_total}
+    if sell_total > 0:
+        result["sell"] = {"win_rate": round(sell_win / sell_total * 100, 1), "samples": sell_total}
+    result["lookahead"] = lookahead
+    return result
+
+
+# ---------------------------------------------------------------------------
 # 3. Price action - mo hinh nen
 # ---------------------------------------------------------------------------
 def _body(c): return abs(c["close"] - c["open"])
@@ -249,8 +326,78 @@ def ichimoku(candles, tenkan_p=9, kijun_p=26, senkou_b_p=52, displacement=26):
 
 
 # ---------------------------------------------------------------------------
-# 6. Wyckoff-inspired heuristic (uu tien cho khung DAI)
+# 5b. Smart Money Concepts (SMC) - ap dung cho MOI khung thoi gian
 # ---------------------------------------------------------------------------
+def market_structure_bos_choch(candles, pivots):
+    """BOS (Break of Structure) = gia pha vo dinh/day cu theo huong xu huong
+    hien tai -> xac nhan tiep dien. CHoCH (Change of Character) = gia pha
+    vo nguoc huong xu huong hien tai -> canh bao dao chieu."""
+    highs = [p for t, p in pivots if t == "H"]
+    lows = [p for t, p in pivots if t == "L"]
+    if len(highs) < 2 or len(lows) < 2:
+        return {"label": "Chua du diem xoay chieu de xac dinh cau truc BOS/CHoCH.", "direction": 0}
+
+    last_high, prev_high = highs[-1], highs[-2]
+    last_low, prev_low = lows[-1], lows[-2]
+    current_close = candles[-1]["close"]
+    uptrend_context = last_high > prev_high
+    downtrend_context = last_low < prev_low
+
+    if uptrend_context and current_close > last_high:
+        return {"label": f"BOS tang: gia vuot dinh cu {round(last_high,2)} -> xac nhan tiep dien xu huong tang.", "direction": 1}
+    if uptrend_context and current_close < last_low:
+        return {"label": f"CHoCH: gia pha day {round(last_low,2)} du dang trong xu huong tang -> canh bao co the dao chieu giam.", "direction": -1}
+    if downtrend_context and current_close < last_low:
+        return {"label": f"BOS giam: gia vuot day cu {round(last_low,2)} -> xac nhan tiep dien xu huong giam.", "direction": -1}
+    if downtrend_context and current_close > last_high:
+        return {"label": f"CHoCH: gia vuot dinh {round(last_high,2)} du dang trong xu huong giam -> canh bao co the dao chieu tang.", "direction": 1}
+    return {"label": "Cau truc thi truong hien chua co tin hieu BOS/CHoCH ro ret.", "direction": 0}
+
+
+def fair_value_gap(candles, lookback=40):
+    """FVG: khoang trong gia giua nen 1 va nen 3 (nen 2 khong lap day) -
+    theo SMC day thuong la vung gia se quay lai 'lap day' truoc khi tiep
+    tuc di theo huong cu."""
+    window = candles[-lookback:] if len(candles) >= lookback else candles
+    gaps = []
+    for i in range(len(window) - 2):
+        c1, c3 = window[i], window[i + 2]
+        if c1["high"] < c3["low"]:
+            gaps.append({"type": "bullish", "top": c3["low"], "bottom": c1["high"]})
+        elif c1["low"] > c3["high"]:
+            gaps.append({"type": "bearish", "top": c1["low"], "bottom": c3["high"]})
+    if not gaps:
+        return {"label": "Khong phat hien Fair Value Gap dang chu y trong du lieu gan day.", "direction": 0}
+    nearest = gaps[-1]
+    price = candles[-1]["close"]
+    inside = nearest["bottom"] <= price <= nearest["top"]
+    zone = f"{round(nearest['bottom'],2)} - {round(nearest['top'],2)}"
+    if inside and nearest["type"] == "bullish":
+        return {"label": f"Gia dang trong vung Fair Value Gap tang ({zone}) -> tiem nang ho tro ky thuat.", "direction": 1}
+    if inside and nearest["type"] == "bearish":
+        return {"label": f"Gia dang trong vung Fair Value Gap giam ({zone}) -> tiem nang khang cu ky thuat.", "direction": -1}
+    return {"label": f"FVG {nearest['type']} gan nhat o vung {zone}, gia chua quay lai test.", "direction": 0}
+
+
+def liquidity_sweep(candles, lookback=30, check_recent=5):
+    """Phat hien hanh vi 'quet thanh khoan': gia pha vo dinh/day cu trong
+    choc lat roi dong cua nguoc lai - dau hieu 'san' lenh dung/cat lo cua
+    dam dong truoc khi dao chieu, thuong duoc trader SMC dung de vao lenh."""
+    window = candles[-lookback:] if len(candles) >= lookback else candles
+    if len(window) < check_recent + 5:
+        return {"label": "Chua du du lieu de kiem tra quet thanh khoan.", "direction": 0}
+    ref = window[:-check_recent]
+    ref_high = max(c["high"] for c in ref)
+    ref_low = min(c["low"] for c in ref)
+    for c in window[-check_recent:]:
+        if c["high"] > ref_high and c["close"] < ref_high:
+            return {"label": f"Phat hien quet thanh khoan tai dinh cu {round(ref_high,2)} roi dong cua duoi lai -> tin hieu dao chieu giam.", "direction": -1}
+        if c["low"] < ref_low and c["close"] > ref_low:
+            return {"label": f"Phat hien quet thanh khoan tai day cu {round(ref_low,2)} roi dong cua tren lai -> tin hieu dao chieu tang.", "direction": 1}
+    return {"label": "Chua phat hien hanh vi quet thanh khoan ro ret gan day.", "direction": 0}
+
+
+
 def wyckoff_heuristic(candles, recent_n=10, prior_n=20):
     if len(candles) < recent_n + prior_n:
         return None
@@ -433,6 +580,20 @@ def build_signal(timeframe, candles, higher_tf_info):
         details["Da_khung"] = 0
         reasons.append("Day la khung lon nhat duoc ho tro (W1), khong co khung cao hon de doi chieu.")
 
+    # --- Smart Money Concepts (SMC) - ap dung cho moi khung thoi gian ---
+    pivots = zigzag_pivots(candles)
+    structure = market_structure_bos_choch(candles, pivots)
+    details["SMC_Structure"] = structure["direction"]
+    reasons.append(f"[SMC - Cau truc thi truong] {structure['label']}")
+
+    fvg = fair_value_gap(candles)
+    details["SMC_FVG"] = fvg["direction"]
+    reasons.append(f"[SMC - Fair Value Gap] {fvg['label']}")
+
+    sweep = liquidity_sweep(candles)
+    details["SMC_Liquidity"] = sweep["direction"]
+    reasons.append(f"[SMC - Thanh khoan] {sweep['label']}")
+
     ichimoku_data, wyckoff_data, elliott_data, dxy_data = None, None, None, None
 
     if is_short:
@@ -543,11 +704,26 @@ class handler(BaseHTTPRequestHandler):
                 "ma100": sma_series(closes_all, 100)[-150:],
             }
 
+            bt = backtest_winrate(candles)
+            backtest_info = None
+            if bt:
+                side = "buy" if signal["score"] >= 0 else "sell"
+                stats = bt.get(side)
+                if stats:
+                    backtest_info = {
+                        "direction": "MUA" if side == "buy" else "BAN",
+                        "win_rate": stats["win_rate"],
+                        "samples": stats["samples"],
+                        "lookahead": bt["lookahead"],
+                        "low_confidence": stats["samples"] < 15,
+                    }
+
             self._send(200, {
                 "timeframe": timeframe,
                 "candles": candles[-150:],
                 "moving_averages": ma_lines,
                 "signal": signal,
+                "backtest": backtest_info,
             })
         except Exception as e:
             self._send(502, {"error": f"Loi lay du lieu tu TwelveData: {e}"})
