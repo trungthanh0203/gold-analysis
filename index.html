@@ -193,6 +193,11 @@
 
       <div class="verdict">
         <div class="verdict-badge" id="verdictBadge">CHƯA PHÂN TÍCH</div>
+        <div id="winRateBox" style="margin-top:12px; display:none;">
+          <div style="font-size:11px; color:var(--text3); margin-bottom:4px;">Tỷ lệ thắng lịch sử (backtest đơn giản)</div>
+          <div style="font-family:var(--font-m); font-size:20px; font-weight:700;" id="winRateValue">—</div>
+          <div style="font-size:10.5px; color:var(--text3); margin-top:3px; line-height:1.5;" id="winRateNote"></div>
+        </div>
       </div>
 
       <div class="breakdown" id="breakdownList"></div>
@@ -525,6 +530,21 @@ function renderResult(data){
 
   document.getElementById('gaugeScore').textContent = (sig.score>=0?'+':'') + sig.score;
   document.getElementById('verdictBadge').textContent = sig.verdict;
+
+  const winBox = document.getElementById('winRateBox');
+  const bt = data.backtest;
+  if(bt){
+    winBox.style.display = 'block';
+    const color = bt.win_rate >= 55 ? 'var(--up)' : (bt.win_rate <= 45 ? 'var(--down)' : 'var(--text)');
+    document.getElementById('winRateValue').innerHTML =
+      `<span style="color:${color}">${bt.win_rate}%</span> <span style="font-size:12px; color:var(--text3); font-weight:400;">nghiêng ${bt.direction}</span>`;
+    document.getElementById('winRateNote').textContent =
+      `Dựa trên ${bt.samples} lần thiết lập tương tự (xu hướng MA + vùng RSI) trong ${data.candles.length} nến gần nhất, `
+      + `đo hướng đi sau ${bt.lookahead} nến. ${bt.low_confidence ? 'Mẫu còn nhỏ, độ tin cậy thấp — ' : ''}`
+      + `Đây là thống kê lịch sử tham khảo, KHÔNG phải cam kết cho kết quả tương lai.`;
+  } else {
+    winBox.style.display = 'none';
+  }
   document.getElementById('needle').setAttribute('transform', `rotate(${(sig.score/100)*80} 90 90)`);
 
   const bdContainer = document.getElementById('breakdownList');
