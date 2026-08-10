@@ -250,6 +250,136 @@ def backtest_winrate(candles, lookahead=10):
 
 
 # ---------------------------------------------------------------------------
+# 2c. BAN DO GIA: Pivot Points (3 muc len / 3 muc xuong) + xac suat cham
+#     muc uoc luong bang thuc nghiem lich su (khong bia so) + danh gia
+#     kha nang phan ung (tiep dien / dao chieu) tai tung muc
+# ---------------------------------------------------------------------------
+def compute_atr_series(candles, period=14):
+    n = len(candles)
+    tr = [None] * n
+    for i in range(1, n):
+        h, l, pc = candles[i]["high"], candles[i]["low"], candles[i - 1]["close"]
+        tr[i] = max(h - l, abs(h - pc), abs(l - pc))
+    atr = [None] * n
+    for i in range(period, n):
+        vals = [tr[j] for j in range(i - period + 1, i + 1) if tr[j] is not None]
+        if len(vals) == period:
+            atr[i] = mean(vals)
+    return atr
+
+
+def classic_pivot_points(candles):
+    """Pivot Point kinh dien (Floor Trader Pivots) tinh tu nen truoc do da
+    dong cua - cho ra dung 3 muc khang cu (R1-R3) va 3 muc ho tro (S1-S3)."""
+    if len(candles) < 2:
+        return None
+    ref = candles[-2]
+    H, L, C = ref["high"], ref["low"], ref["close"]
+    P = (H + L + C) / 3
+    R1, S1 = 2 * P - L, 2 * P - H
+    R2, S2 = P + (H - L), P - (H - L)
+    R3, S3 = H + 2 * (P - L), L - 2 * (H - P)
+    return {"pivot": round(P, 2), "R1": round(R1, 2), "R2": round(R2, 2), "R3": round(R3, 2),
+            "S1": round(S1, 2), "S2": round(S2, 2), "S3": round(S3, 2)}
+
+
+def empirical_move_distribution(candles, lookahead=20):
+    """Quet lich su: tai moi diem, do xem gia da di XA BAO NHIEU LAN ATR
+    theo huong len va xuong trong N nen tiep theo. Day la phan phoi thuc
+    nghiem dung de uoc luong xac suat cham 1 muc gia cach hien tai bao
+    nhieu ATR - dua tren du lieu THAT, khong phai cong thuc bia dat."""
+    closes = [c["close"] for c in candles]
+    highs = [c["high"] for c in candles]
+    lows = [c["low"] for c in candles]
+    atr = compute_atr_series(candles, 14)
+    n = len(candles)
+    up_moves, down_moves = [], []
+    for i in range(20, n - lookahead):
+        if not atr[i]:
+            continue
+        future_high = max(highs[i + 1:i + 1 + lookahead])
+        future_low = min(lows[i + 1:i + 1 + lookahead])
+        up_moves.append((future_high - closes[i]) / atr[i])
+        down_moves.append((closes[i] - future_low) / atr[i])
+    current_atr = atr[-1]
+    return up_moves, down_moves, current_atr
+
+
+def prob_reach(moves_list, target_atr_distance):
+    if not moves_list or target_atr_distance is None:
+        return None
+    count = sum(1 for m in moves_list if m >= target_atr_distance)
+    return round(count / len(moves_list) * 100, 1)
+
+
+def confluence_check(level_price, fib, bb_upper, bb_lower, fvg_zones, tolerance_pct=0.003):
+    matches = []
+    if fib:
+        for name, val in fib["levels"].items():
+            if abs(val - level_price) / level_price < tolerance_pct:
+                matches.append(f"Fibonacci {name}")
+    if bb_upper and abs(bb_upper - level_price) / level_price < tolerance_pct:
+        matches.append("dai tren Bollinger")
+    if bb_lower and abs(bb_lower - level_price) / level_price < tolerance_pct:
+        matches.append("dai duoi Bollinger")
+    for g in fvg_zones:
+        if g["bottom"] <= level_price <= g["top"]:
+            matches.append(f"vung Fair Value Gap {g['type']}")
+    nearest_round = round(level_price / 10) * 10
+    if abs(nearest_round - level_price) < 2:
+        matches.append(f"moc tam ly tron so (~{nearest_round})")
+    return matches
+
+
+def reaction_label(matches):
+    if len(matches) >= 2:
+        return "Cao", f"Trung voi {', '.join(matches)} -> nhieu kha nang co phan ung dao chieu/giang co tai day."
+    if len(matches) == 1:
+        return "Trung binh", f"Trung voi {matches[0]} -> co the co phan ung nhung chua chac chan."
+    return "Thap", "Khong trung vung ky thuat dang chu y nao khac -> kha nang gia chi di qua ma khong phan ung manh."
+
+
+def build_price_map(candles, signal):
+    pivots = classic_pivot_points(candles)
+    if not pivots or len(candles) < 90:
+        return None
+    up_moves, down_moves, current_atr = empirical_move_distribution(candles, lookahead=20)
+    closes = [c["close"] for c in candles]
+    fib = fibonacci_position(candles, 50)
+    bb_l, bb_m, bb_u = bollinger(closes, 20, 2)
+    fvg_zones = find_all_fvg(candles, 40)
+    last_close = candles[-1]["close"]
+
+    def build_level(name, price, direction):
+        if direction == "up" and price <= last_close:
+            return {"label": name, "price": price, "probability": None, "already_passed": True,
+                    "reaction_confidence": "—", "reaction_note": "Gia hien da o tren muc nay."}
+        if direction == "down" and price >= last_close:
+            return {"label": name, "price": price, "probability": None, "already_passed": True,
+                    "reaction_confidence": "—", "reaction_note": "Gia hien da o duoi muc nay."}
+        dist_atr = abs(price - last_close) / current_atr if current_atr else None
+        prob = prob_reach(up_moves if direction == "up" else down_moves, dist_atr)
+        matches = confluence_check(price, fib, bb_u, bb_l, fvg_zones)
+        conf_label, conf_text = reaction_label(matches)
+        return {"label": name, "price": price, "probability": prob, "already_passed": False,
+                "reaction_confidence": conf_label, "reaction_note": conf_text}
+
+    up_levels = [build_level(n, pivots[n], "up") for n in ("R1", "R2", "R3")]
+    down_levels = [build_level(n, pivots[n], "down") for n in ("S1", "S2", "S3")]
+
+    side_text = "TREN" if last_close > pivots["pivot"] else "DUOI"
+    lean_text = "tang" if last_close > pivots["pivot"] else "giam"
+    narrative = (f"He thong da yeu to danh gia xu huong hien tai la {signal['verdict']} "
+                 f"(diem hop luu {signal['score']}/100). Gia dang o {side_text} duong pivot trung tam "
+                 f"({pivots['pivot']}), thien ve phia {lean_text} trong ngan han. Cac muc ben duoi la "
+                 f"vung gia tham khao - khong phai diem vao/thoat lenh bat buoc, ban tu can nhac ket hop "
+                 f"voi khau vi rui ro cua minh.")
+
+    return {"pivot": pivots["pivot"], "up_levels": up_levels, "down_levels": down_levels,
+            "narrative": narrative, "atr": round(current_atr, 2) if current_atr else None}
+
+
+# ---------------------------------------------------------------------------
 # 3. Price action - mo hinh nen
 # ---------------------------------------------------------------------------
 def _body(c): return abs(c["close"] - c["open"])
@@ -823,6 +953,7 @@ class handler(BaseHTTPRequestHandler):
                     }
 
             pending_order = pending_order_suggestion(candles, signal["score"])
+            price_map = build_price_map(candles, signal)
 
             self._send(200, {
                 "timeframe": timeframe,
@@ -831,6 +962,7 @@ class handler(BaseHTTPRequestHandler):
                 "signal": signal,
                 "backtest": backtest_info,
                 "pending_order": pending_order,
+                "price_map": price_map,
             })
         except Exception as e:
             self._send(502, {"error": f"Loi lay du lieu tu TwelveData: {e}"})
