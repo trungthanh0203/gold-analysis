@@ -2,8 +2,19 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>XAU/USD — Bảng phân tích vàng đa khung thời gian</title>
+
+<!-- PWA: cho phép cài đặt trang này như một app trên điện thoại/laptop -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0B0B0D">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gold Analysis">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -138,7 +149,10 @@
       </div>
       <div class="status-line" id="statusLine">Bấm "Phân tích" để lấy dữ liệu thật mới nhất và chạy phân tích.</div>
     </div>
-    <button class="analyze-btn" id="analyzeBtn"><span class="dot"></span> Phân tích XAU/USD</button>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="analyze-btn" id="installBtn" style="display:none; background:var(--surface2); color:var(--text);">⭳ Cài đặt app</button>
+      <button class="analyze-btn" id="analyzeBtn"><span class="dot"></span> Phân tích XAU/USD</button>
+    </div>
   </div>
 
   <div class="grid">
@@ -767,6 +781,49 @@ document.querySelectorAll('.tf-btn').forEach(btn=>{
 });
 document.getElementById('analyzeBtn').addEventListener('click', runAnalysis);
 window.addEventListener('resize', ()=> redraw());
+
+// ================== PWA: DANG KY SERVICE WORKER + NUT CAI DAT ==================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
+
+let deferredInstallPrompt = null;
+const installBtn = document.getElementById('installBtn');
+
+// Android / Desktop Chrome, Edge: trinh duyet tu bao khi du dieu kien cai dat
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  installBtn.style.display = 'inline-flex';
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!deferredInstallPrompt) {
+    // iOS Safari khong ho tro prompt tu dong -> huong dan thu cong
+    alert('Trên iPhone/iPad (Safari): bấm nút Chia sẻ (hình vuông có mũi tên) ở thanh dưới trình duyệt, sau đó chọn "Thêm vào Màn hình chính" (Add to Home Screen).');
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  installBtn.style.display = 'none';
+});
+
+// Da cai dat roi thi an nut di
+window.addEventListener('appinstalled', () => {
+  installBtn.style.display = 'none';
+});
+
+// iOS Safari: khong co su kien beforeinstallprompt, nhung neu dang chay
+// tren Safari va chua o che do standalone thi van hien nut de huong dan
+// thu cong (bam vao se hien alert huong dan o tren).
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+if (isIOS && !isStandalone) {
+  installBtn.style.display = 'inline-flex';
+}
 </script>
 </body>
 </html>
