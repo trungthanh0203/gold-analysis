@@ -1,0 +1,17 @@
+{
+  "name": "Phân tích giá vàng XAU/USD",
+  "short_name": "Gold Analysis",
+  "description": "Phân tích kỹ thuật đa khung thời gian cho vàng (XAU/USD) - chỉ báo, mô hình nến, SMC, bản đồ giá và xác suất.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B0B0D",
+  "theme_color": "#0B0B0D",
+  "lang": "vi",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
