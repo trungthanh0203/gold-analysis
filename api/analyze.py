@@ -4,40 +4,27 @@ api/analyze.py
 Ham serverless (Vercel Python Runtime). Moi lan giao dien goi:
     GET /api/analyze?timeframe=H1
 
-He thong phan tich THICH UNG theo khung thoi gian (dung goi y da thao luan):
+He thong phan tich thich ung theo khung thoi gian:
 
-  KHUNG NGAN (M5, M15, H1) -> uu tien:
+  KHUNG NGAN (M3, M5, M15, M30, H1) -> uu tien:
       - Chi bao co ban: RSI, MACD, MA20/50, Bollinger
       - Price action: mo hinh nen (candlestick pattern)
-      - Ichimoku Kinko Hyo (Tenkan/Kijun, vi tri gia so voi may Kumo)
+      - Ichimoku Kinko Hyo
       - Fibonacci Retracement
       - Doi chieu da khung (confluence voi khung lon hon lien ke)
 
   KHUNG DAI (H4, D1, W1) -> them vao:
-      - Wyckoff-inspired: heuristic co/gian bien do + huong breakout
-        (LUU Y: vang giao ngay khong co du lieu khoi luong thong nhat nen
-        day la phien ban DON GIAN HOA dua tren bien do gia, khong phai
-        phan tich Wyckoff day du theo sach vo)
-      - Elliott-inspired: dem cau truc song swing don gian bang thuat
-        toan zigzag (LUU Y: day la heuristic tham khao, khong thay the
-        viec dem song Elliott chuyen sau can chuyen gia)
-      - Lien thi truong: xu huong chi so DXY (dong USD) - vang thuong
-        tuong quan NGHICH voi DXY
+      - Wyckoff-inspired (don gian hoa, khong co du lieu khoi luong)
+      - Elliott-inspired (heuristic swing, khong thay the phan tich chuyen sau)
+      - Lien thi truong: xu huong chi so DXY
 
   MOI KHUNG THOI GIAN cung duoc bo sung 3 yeu to Smart Money Concepts (SMC):
-      - Market Structure BOS/CHoCH (Break of Structure / Change of Character)
-      - Fair Value Gap (FVG) - vung khoang trong gia chua duoc lap day
-      - Liquidity Sweep - phat hien hanh vi quet thanh khoan tai dinh/day cu
-        (LUU Y: day la cai dat heuristic don gian hoa cua SMC, khong thay
-        the viec doc bieu do thu cong theo truong phai SMC chuyen sau)
+      - Market Structure BOS/CHoCH, Fair Value Gap, Liquidity Sweep
 
-  NGOAI RA: he thong chay 1 BACKTEST DON GIAN tren chinh du lieu lich su
-  vua lay ve (khong bia so) de tinh ty le % cac lan tin hieu tuong tu
-  (cung huong xu huong MA + cung vung RSI) da di dung huong trong qua
-  khu gan day - giup nguoi dung co them can cu tham khao ve do tin cay,
-  KHONG phai la loi hua ve ket qua tuong lai.
+  NGOAI RA: chay 1 backtest don gian tren du lieu lich su that de tinh ty le
+  % thang tham khao, va 1 ban do gia (Pivot + ATR) uoc luong xac suat cham
+  cac muc gia. Tat ca noi dung tra ve deu viet bang tieng Viet co dau.
 
-Tat ca duoc cham diem -1/0/+1 va cong lai thanh diem hop luu -100..+100.
 Khong dung pandas/numpy -> khong can requirements.txt -> cold start nhanh.
 
 Bien moi truong can cau hinh tren Vercel:
@@ -54,19 +41,16 @@ from statistics import mean, pstdev
 TD_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "")
 TD_URL = "https://api.twelvedata.com/time_series"
 
-# TwelveData KHONG ho tro thang do "3min" truc tiep (danh sach ho tro: 1min,
-# 5min, 15min, 30min, 45min, 1h, 2h, 4h, 8h, 1day, 1week, 1month). Vi vay M3
-# duoc TU XAY DUNG bang cach lay du lieu 1min that roi GOP moi 3 nen lai
-# thanh 1 nen 3 phut (aggregation) - van la du lieu that 100%, khong noi suy.
+# TwelveData khong ho tro khung "3min" truc tiep, nen M3 duoc tu xay dung
+# bang cach lay du lieu 1min that roi gop moi 3 nen lai (van la du lieu that).
 BASE_INTERVAL = {
     "M3": "1min", "M5": "5min", "M15": "15min", "M30": "30min",
     "H1": "1h", "H4": "4h", "D1": "1day", "W1": "1week",
 }
-AGGREGATE_FACTOR = {"M3": 3}  # cac khung khac = 1 (khong gop)
-INTERVAL_MAP = BASE_INTERVAL  # giu ten cu de tuong thich cho phan validate timeframe
+AGGREGATE_FACTOR = {"M3": 3}
+INTERVAL_MAP = BASE_INTERVAL
 OUTPUT_SIZE = {
-    "M3": 750,  # can nhieu nen 1min hon vi se gop 3 nen -> 1
-    "M5": 250, "M15": 250, "M30": 250, "H1": 250, "H4": 250, "D1": 260, "W1": 200,
+    "M3": 750, "M5": 250, "M15": 250, "M30": 250, "H1": 250, "H4": 250, "D1": 260, "W1": 200,
 }
 HIGHER_TF = {
     "M3": "M30", "M5": "H1", "M15": "H4", "M30": "H4",
@@ -75,12 +59,22 @@ HIGHER_TF = {
 SHORT_TFS = {"M3", "M5", "M15", "M30", "H1"}
 LONG_TFS = {"H4", "D1", "W1"}
 
+# Nhan hien thi tieng Viet cho tung yeu to trong bang chi tiet dong gop diem
+# (backend van dung key ky thuat khong dau lam ID noi bo cho on dinh, nhung
+# gui kem bang nay de frontend hien thi dung tieng Viet co dau).
+DETAIL_LABELS_VI = {
+    "RSI": "RSI", "MACD": "MACD", "MA_Trend": "Xu hướng MA", "Bollinger": "Bollinger",
+    "Candle_Pattern": "Mô hình nến", "Fibonacci": "Fibonacci", "Da_khung": "Đa khung",
+    "SMC_Structure": "Cấu trúc SMC", "SMC_FVG": "FVG (SMC)", "SMC_Liquidity": "Thanh khoản SMC",
+    "Ichimoku": "Ichimoku", "Wyckoff": "Wyckoff", "Elliott": "Elliott", "DXY": "DXY (USD)",
+}
+VI_TYPE = {"bullish": "tăng", "bearish": "giảm"}
+
 
 # ---------------------------------------------------------------------------
 # 1. Lay du lieu that tu TwelveData (+ tu gop nen cho M3)
 # ---------------------------------------------------------------------------
 def aggregate_candles(candles, group_size):
-    """Gop N nen lien tiep thanh 1 nen lon hon (dung cho M3 = gop 3 nen 1min)."""
     grouped = []
     for i in range(0, len(candles) - group_size + 1, group_size):
         chunk = candles[i:i + group_size]
@@ -106,7 +100,7 @@ def fetch_series(symbol: str, timeframe: str, size: int = None):
     with urllib.request.urlopen(req, timeout=12) as resp:
         data = json.loads(resp.read().decode())
     if "values" not in data:
-        raise RuntimeError(str(data.get("message") or data.get("code") or "Loi khong xac dinh tu TwelveData"))
+        raise RuntimeError(str(data.get("message") or data.get("code") or "Lỗi không xác định từ TwelveData"))
     candles = [
         {"time": v["datetime"], "open": float(v["open"]), "high": float(v["high"]),
          "low": float(v["low"]), "close": float(v["close"])}
@@ -118,8 +112,6 @@ def fetch_series(symbol: str, timeframe: str, size: int = None):
     return candles
 
 
-
-
 # ---------------------------------------------------------------------------
 # 2. Chi bao co ban (dung cho moi khung)
 # ---------------------------------------------------------------------------
@@ -128,7 +120,6 @@ def sma(vals, period):
 
 
 def sma_series(vals, period):
-    """Tra ve MA CA CHUOI (khong chi 1 gia tri cuoi) de ve duong len chart."""
     out = []
     for i in range(len(vals)):
         if i + 1 < period:
@@ -186,8 +177,7 @@ def bollinger(vals, period=20, mult=2):
 
 
 # ---------------------------------------------------------------------------
-# 2b. Backtest don gian - tinh ty le % tin hieu tuong tu da dung huong
-#     trong qua khu (dung CHINH du lieu that vua lay ve, khong bia so)
+# 2b. Backtest don gian - ty le % tin hieu tuong tu da dung huong trong qua khu
 # ---------------------------------------------------------------------------
 def rolling_sma(vals, period):
     out = [None] * len(vals)
@@ -216,11 +206,6 @@ def rolling_rsi(vals, period=14):
 
 
 def backtest_winrate(candles, lookahead=10):
-    """Quet qua toan bo du lieu lich su da lay ve: tai moi diem trong qua
-    khu, kiem tra xem 'thiet lap' (setup) co giong tinh trang hien tai
-    khong (xu huong MA20/50 + vung RSI), roi xem gia co di dung huong sau
-    N nen tiep theo hay khong. Tra ve ty le % thang cho ca 2 chieu MUA/BAN
-    dua tren mau du lieu THAT, khong phai cong thuc suy dien."""
     closes = [c["close"] for c in candles]
     n = len(closes)
     if n < 90:
@@ -250,9 +235,8 @@ def backtest_winrate(candles, lookahead=10):
 
 
 # ---------------------------------------------------------------------------
-# 2c. BAN DO GIA: Pivot Points (3 muc len / 3 muc xuong) + xac suat cham
-#     muc uoc luong bang thuc nghiem lich su (khong bia so) + danh gia
-#     kha nang phan ung (tiep dien / dao chieu) tai tung muc
+# 2c. Ban do gia: Pivot Points (3 muc len / 3 muc xuong) + xac suat cham muc
+#     (thuc nghiem lich su) + danh gia kha nang phan ung tai tung muc
 # ---------------------------------------------------------------------------
 def compute_atr_series(candles, period=14):
     n = len(candles)
@@ -269,8 +253,6 @@ def compute_atr_series(candles, period=14):
 
 
 def pivot_center(candles):
-    """Duong Pivot trung tam, tinh tu H/L/C cua nen truoc do da dong cua -
-    dung lam moc quy chieu 'tren/duoi thien tang/giam'."""
     if len(candles) < 2:
         return None
     ref = candles[-2]
@@ -279,10 +261,6 @@ def pivot_center(candles):
 
 
 def empirical_move_distribution(candles, lookahead=20):
-    """Quet lich su: tai moi diem, do xem gia da di XA BAO NHIEU LAN ATR
-    theo huong len va xuong trong N nen tiep theo. Day la phan phoi thuc
-    nghiem dung de uoc luong xac suat cham 1 muc gia cach hien tai bao
-    nhieu ATR - dua tren du lieu THAT, khong phai cong thuc bia dat."""
     closes = [c["close"] for c in candles]
     highs = [c["high"] for c in candles]
     lows = [c["low"] for c in candles]
@@ -314,29 +292,27 @@ def confluence_check(level_price, fib, bb_upper, bb_lower, fvg_zones, tolerance_
             if abs(val - level_price) / level_price < tolerance_pct:
                 matches.append(f"Fibonacci {name}")
     if bb_upper and abs(bb_upper - level_price) / level_price < tolerance_pct:
-        matches.append("dai tren Bollinger")
+        matches.append("dải trên Bollinger")
     if bb_lower and abs(bb_lower - level_price) / level_price < tolerance_pct:
-        matches.append("dai duoi Bollinger")
+        matches.append("dải dưới Bollinger")
     for g in fvg_zones:
         if g["bottom"] <= level_price <= g["top"]:
-            matches.append(f"vung Fair Value Gap {g['type']}")
+            matches.append(f"vùng Fair Value Gap {VI_TYPE.get(g['type'], g['type'])}")
     nearest_round = round(level_price / 10) * 10
     if abs(nearest_round - level_price) < 2:
-        matches.append(f"moc tam ly tron so (~{nearest_round})")
+        matches.append(f"mốc tâm lý tròn số (~{nearest_round})")
     return matches
 
 
 def reaction_label(matches):
-    """Danh gia kha nang gia TIEP DIEN (di xuyen qua) hay DAO CHIEU/giang co
-    tai 1 muc gia cu the, dua tren so vung ky thuat khac trung khop."""
     if len(matches) >= 2:
-        return ("Cao", f"Trung voi {', '.join(matches)} -> kha nang cao gia se PHAN UNG (dao chieu hoac "
-                        f"giang co) tai day thay vi di xuyen qua ngay.")
+        return ("Cao", f"Trùng với {', '.join(matches)} -> khả năng cao giá sẽ PHẢN ỨNG (đảo chiều hoặc "
+                        f"giằng co) tại đây thay vì đi xuyên qua ngay.")
     if len(matches) == 1:
-        return ("Trung binh", f"Trung voi {matches[0]} -> co the co phan ung nhe, nhung cung co kha nang "
-                               f"gia chi giang co roi TIEP DIEN xu huong cu, chua du manh de khang dinh dao chieu.")
-    return ("Thap", "Khong trung vung ky thuat dang chu y nao khac -> nhieu kha nang gia se TIEP DIEN "
-                     "(di xuyen qua muc nay) hon la dao chieu manh tai day.")
+        return ("Trung bình", f"Trùng với {matches[0]} -> có thể có phản ứng nhẹ, nhưng cũng có khả năng "
+                               f"giá chỉ giằng co rồi TIẾP DIỄN xu hướng cũ, chưa đủ mạnh để khẳng định đảo chiều.")
+    return ("Thấp", "Không trùng vùng kỹ thuật đáng chú ý nào khác -> nhiều khả năng giá sẽ TIẾP DIỄN "
+                     "(đi xuyên qua mức này) hơn là đảo chiều mạnh tại đây.")
 
 
 def build_price_map(candles, signal):
@@ -352,9 +328,6 @@ def build_price_map(candles, signal):
     fvg_zones = find_all_fvg(candles, 40)
     last_close = candles[-1]["close"]
 
-    # Giai cach cac muc theo BOI SO ATR (khong dung H-L cua rieng 1 nen)
-    # de dam bao R1-R2-R3 / S1-S2-S3 LUON tach biet ro theo dung bien dong
-    # thuc te, tranh bi don sat nhau khi nen tham chieu qua yen ang.
     atr_multiples = {"1": 1.0, "2": 2.0, "3": 3.5}
     pivots = {"pivot": pivot}
     for suffix, mult in atr_multiples.items():
@@ -364,10 +337,10 @@ def build_price_map(candles, signal):
     def build_level(name, price, direction):
         if direction == "up" and price <= last_close:
             return {"label": name, "price": price, "probability": None, "already_passed": True,
-                    "reaction_confidence": "—", "reaction_note": "Gia hien da o tren muc nay."}
+                    "reaction_confidence": "—", "reaction_note": "Giá hiện đã ở trên mức này."}
         if direction == "down" and price >= last_close:
             return {"label": name, "price": price, "probability": None, "already_passed": True,
-                    "reaction_confidence": "—", "reaction_note": "Gia hien da o duoi muc nay."}
+                    "reaction_confidence": "—", "reaction_note": "Giá hiện đã ở dưới mức này."}
         dist_atr = abs(price - last_close) / current_atr
         prob = prob_reach(up_moves if direction == "up" else down_moves, dist_atr)
         matches = confluence_check(price, fib, bb_u, bb_l, fvg_zones)
@@ -378,14 +351,14 @@ def build_price_map(candles, signal):
     up_levels = [build_level(n, pivots[n], "up") for n in ("R1", "R2", "R3")]
     down_levels = [build_level(n, pivots[n], "down") for n in ("S1", "S2", "S3")]
 
-    side_text = "TREN" if last_close > pivot else "DUOI"
-    lean_text = "tang" if last_close > pivot else "giam"
-    narrative = (f"He thong da yeu to danh gia xu huong hien tai la {signal['verdict']} "
-                 f"(diem hop luu {signal['score']}/100). Gia dang o {side_text} duong pivot trung tam "
-                 f"({pivot}), thien ve phia {lean_text} trong ngan han. Cac muc R1-R3/S1-S3 duoc gian cach "
-                 f"theo bien dong thuc te (ATR = {round(current_atr,2)}) nen cang xa gia hien tai thi xac "
-                 f"suat cham toi cang thap. Day la vung gia tham khao - khong phai diem vao/thoat lenh bat "
-                 f"buoc, ban tu can nhac ket hop voi khau vi rui ro cua minh.")
+    side_text = "TRÊN" if last_close > pivot else "DƯỚI"
+    lean_text = "tăng" if last_close > pivot else "giảm"
+    narrative = (f"Hệ thống đa yếu tố đánh giá xu hướng hiện tại là {signal['verdict']} "
+                 f"(điểm hợp lưu {signal['score']}/100). Giá đang ở {side_text} đường pivot trung tâm "
+                 f"({pivot}), thiên về phía {lean_text} trong ngắn hạn. Các mức R1-R3/S1-S3 được giãn cách "
+                 f"theo biến động thực tế (ATR = {round(current_atr,2)}) nên càng xa giá hiện tại thì xác "
+                 f"suất chạm tới càng thấp. Đây là vùng giá tham khảo - không phải điểm vào/thoát lệnh bắt "
+                 f"buộc, bạn tự cân nhắc kết hợp với khẩu vị rủi ro của mình.")
 
     return {"pivot": pivot, "up_levels": up_levels, "down_levels": down_levels,
             "narrative": narrative, "atr": round(current_atr, 2)}
@@ -402,31 +375,31 @@ def _is_bear(c): return c["close"] < c["open"]
 
 def detect_candle_pattern(candles):
     if len(candles) < 3:
-        return "Chua du du lieu", 0
+        return "Chưa đủ dữ liệu", 0
     c1, c2, c3 = candles[-3], candles[-2], candles[-1]
     body1, body3, small2 = _body(c1), _body(c3), _body(c2)
     mid1 = (c1["open"] + c1["close"]) / 2
     if _is_bear(c1) and body1 > 0 and small2 < body1 * 0.4 and _is_bull(c3) and c3["close"] > mid1:
         return "Morning Star (Sao Mai)", 1
     if _is_bull(c1) and body1 > 0 and small2 < body1 * 0.4 and _is_bear(c3) and c3["close"] < mid1:
-        return "Evening Star (Sao Hom)", -1
+        return "Evening Star (Sao Hôm)", -1
     prev, curr = candles[-2], candles[-1]
     if _is_bear(prev) and _is_bull(curr) and curr["close"] >= prev["open"] and curr["open"] <= prev["close"]:
-        return "Bullish Engulfing (Nen bao trum tang)", 1
+        return "Bullish Engulfing (Nến bao trùm tăng)", 1
     if _is_bull(prev) and _is_bear(curr) and curr["open"] >= prev["close"] and curr["close"] <= prev["open"]:
-        return "Bearish Engulfing (Nen bao trum giam)", -1
+        return "Bearish Engulfing (Nến bao trùm giảm)", -1
     c = candles[-1]
     body, rng = _body(c), _range(c)
     if rng > 0:
         lower_wick = min(c["open"], c["close"]) - c["low"]
         upper_wick = c["high"] - max(c["open"], c["close"])
         if lower_wick > body * 2 and upper_wick < body * 0.6:
-            return "Hammer (Bua)", 1
+            return "Hammer (Búa)", 1
         if upper_wick > body * 2 and lower_wick < body * 0.6:
-            return "Shooting Star (Sao boi)", -1
+            return "Shooting Star (Sao băng)", -1
         if body / rng < 0.1:
-            return "Doji (luong luy)", 0
-    return "Khong co mo hinh ro ret", 0
+            return "Doji (lưỡng lự)", 0
+    return "Không có mô hình rõ rệt", 0
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +442,7 @@ def ichimoku(candles, tenkan_p=9, kijun_p=26, senkou_b_p=52, displacement=26):
 
     n = len(candles)
     idx_now = n - 1
-    idx_cloud_base = idx_now - displacement  # may Kumo hien tai duoc "ve" tu du lieu cach day 26 nen
+    idx_cloud_base = idx_now - displacement
 
     tenkan_now = line_at(idx_now, tenkan_p)
     kijun_now = line_at(idx_now, kijun_p)
@@ -500,13 +473,10 @@ def ichimoku(candles, tenkan_p=9, kijun_p=26, senkou_b_p=52, displacement=26):
 # 5b. Smart Money Concepts (SMC) - ap dung cho MOI khung thoi gian
 # ---------------------------------------------------------------------------
 def market_structure_bos_choch(candles, pivots):
-    """BOS (Break of Structure) = gia pha vo dinh/day cu theo huong xu huong
-    hien tai -> xac nhan tiep dien. CHoCH (Change of Character) = gia pha
-    vo nguoc huong xu huong hien tai -> canh bao dao chieu."""
     highs = [p for t, p in pivots if t == "H"]
     lows = [p for t, p in pivots if t == "L"]
     if len(highs) < 2 or len(lows) < 2:
-        return {"label": "Chua du diem xoay chieu de xac dinh cau truc BOS/CHoCH.", "direction": 0}
+        return {"label": "Chưa đủ điểm xoay chiều để xác định cấu trúc BOS/CHoCH.", "direction": 0}
 
     last_high, prev_high = highs[-1], highs[-2]
     last_low, prev_low = lows[-1], lows[-2]
@@ -515,19 +485,17 @@ def market_structure_bos_choch(candles, pivots):
     downtrend_context = last_low < prev_low
 
     if uptrend_context and current_close > last_high:
-        return {"label": f"BOS tang: gia vuot dinh cu {round(last_high,2)} -> xac nhan tiep dien xu huong tang.", "direction": 1}
+        return {"label": f"BOS tăng: giá vượt đỉnh cũ {round(last_high,2)} -> xác nhận tiếp diễn xu hướng tăng.", "direction": 1}
     if uptrend_context and current_close < last_low:
-        return {"label": f"CHoCH: gia pha day {round(last_low,2)} du dang trong xu huong tang -> canh bao co the dao chieu giam.", "direction": -1}
+        return {"label": f"CHoCH: giá phá đáy {round(last_low,2)} dù đang trong xu hướng tăng -> cảnh báo có thể đảo chiều giảm.", "direction": -1}
     if downtrend_context and current_close < last_low:
-        return {"label": f"BOS giam: gia vuot day cu {round(last_low,2)} -> xac nhan tiep dien xu huong giam.", "direction": -1}
+        return {"label": f"BOS giảm: giá vượt đáy cũ {round(last_low,2)} -> xác nhận tiếp diễn xu hướng giảm.", "direction": -1}
     if downtrend_context and current_close > last_high:
-        return {"label": f"CHoCH: gia vuot dinh {round(last_high,2)} du dang trong xu huong giam -> canh bao co the dao chieu tang.", "direction": 1}
-    return {"label": "Cau truc thi truong hien chua co tin hieu BOS/CHoCH ro ret.", "direction": 0}
+        return {"label": f"CHoCH: giá vượt đỉnh {round(last_high,2)} dù đang trong xu hướng giảm -> cảnh báo có thể đảo chiều tăng.", "direction": 1}
+    return {"label": "Cấu trúc thị trường hiện chưa có tín hiệu BOS/CHoCH rõ rệt.", "direction": 0}
 
 
 def find_all_fvg(candles, lookback=40):
-    """Tra ve TAT CA cac Fair Value Gap trong pham vi lookback (dung chung
-    cho ca viec cham diem tin hieu lan goi y lenh cho)."""
     window = candles[-lookback:] if len(candles) >= lookback else candles
     gaps = []
     for i in range(len(window) - 2):
@@ -540,33 +508,24 @@ def find_all_fvg(candles, lookback=40):
 
 
 def fair_value_gap(candles, lookback=40):
-    """FVG: khoang trong gia giua nen 1 va nen 3 (nen 2 khong lap day) -
-    theo SMC day thuong la vung gia se quay lai 'lap day' truoc khi tiep
-    tuc di theo huong cu."""
     gaps = find_all_fvg(candles, lookback)
     if not gaps:
-        return {"label": "Khong phat hien Fair Value Gap dang chu y trong du lieu gan day.", "direction": 0}
+        return {"label": "Không phát hiện Fair Value Gap đáng chú ý trong dữ liệu gần đây.", "direction": 0}
     nearest = gaps[-1]
     price = candles[-1]["close"]
     inside = nearest["bottom"] <= price <= nearest["top"]
     zone = f"{round(nearest['bottom'],2)} - {round(nearest['top'],2)}"
     if inside and nearest["type"] == "bullish":
-        return {"label": f"Gia dang trong vung Fair Value Gap tang ({zone}) -> tiem nang ho tro ky thuat.", "direction": 1}
+        return {"label": f"Giá đang trong vùng Fair Value Gap tăng ({zone}) -> tiềm năng hỗ trợ kỹ thuật.", "direction": 1}
     if inside and nearest["type"] == "bearish":
-        return {"label": f"Gia dang trong vung Fair Value Gap giam ({zone}) -> tiem nang khang cu ky thuat.", "direction": -1}
-    return {"label": f"FVG {nearest['type']} gan nhat o vung {zone}, gia chua quay lai test.", "direction": 0}
+        return {"label": f"Giá đang trong vùng Fair Value Gap giảm ({zone}) -> tiềm năng kháng cự kỹ thuật.", "direction": -1}
+    return {"label": f"FVG {VI_TYPE.get(nearest['type'], nearest['type'])} gần nhất ở vùng {zone}, giá chưa quay lại test.", "direction": 0}
 
 
 # ---------------------------------------------------------------------------
 # 5c. Goi y lenh cho (Buy/Sell Limit/Stop) tu hop luu Fibonacci + FVG
 # ---------------------------------------------------------------------------
 def pending_order_suggestion(candles, score):
-    """Ket hop vung Fibonacci 'golden zone' (38.2%-61.8%) voi Fair Value Gap
-    de goi y 1 lenh CHO cu the (gia vao, SL, TP) thay vi chi bao huong
-    chung chung. Neu gia da o sat vung dinh/day song gan nhat, uu tien goi
-    y lenh BREAKOUT (Stop); neu chua, uu tien lenh CHO GIA HOI VE (Limit)
-    tai vung hop luu Fibonacci + FVG neu tim thay, hoac tai muc Fibonacci
-    thuan neu khong co FVG trung khop."""
     fib = fibonacci_position(candles, 50)
     if not fib:
         return None
@@ -588,7 +547,7 @@ def pending_order_suggestion(candles, score):
             sl = round(swing_high - extension * 0.25, 2)
             tp = round(entry + extension, 2)
             return {"order_type": "Buy Stop", "entry": entry, "sl": sl, "tp": tp,
-                    "reason": f"Gia dang o sat dinh song gan nhat ({swing_high}) trong xu huong tang -> cho gia XAC NHAN pha vo bang lenh Buy Stop phia tren, tranh vao som khi chua breakout that."}
+                    "reason": f"Giá đang ở sát đỉnh sóng gần nhất ({swing_high}) trong xu hướng tăng -> chờ giá XÁC NHẬN phá vỡ bằng lệnh Buy Stop phía trên, tránh vào sớm khi chưa breakout thật."}
         matched = [g for g in gaps if g["type"] == "bullish" and g["bottom"] <= golden_high and g["top"] >= golden_low]
         if matched:
             g = matched[-1]
@@ -596,20 +555,19 @@ def pending_order_suggestion(candles, score):
             sl = round(g["bottom"] - extension * 0.1, 2)
             tp = round(swing_high, 2)
             return {"order_type": "Buy Limit", "entry": entry, "sl": sl, "tp": tp,
-                    "reason": f"Vung hop luu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trung voi Fair Value Gap tang ({g['bottom']}-{g['top']}) -> dat lenh Buy Limit cho gia hoi ve day truoc khi tiep tuc tang."}
-        entry = golden_low  # muc 61.8% - vung hoi sau, an toan hon
+                    "reason": f"Vùng hợp lưu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trùng với Fair Value Gap tăng ({g['bottom']}-{g['top']}) -> đặt lệnh Buy Limit chờ giá hồi về đây trước khi tiếp tục tăng."}
+        entry = golden_low
         sl = round(swing_low - extension * 0.1, 2)
         tp = round(swing_high, 2)
         return {"order_type": "Buy Limit", "entry": entry, "sl": sl, "tp": tp,
-                "reason": f"Chua tim thay Fair Value Gap trung khop, dat lenh Buy Limit tai muc Fibonacci 61.8% ({entry}) - vung hoi thoai lui pho bien truoc khi tiep dien xu huong tang."}
+                "reason": f"Chưa tìm thấy Fair Value Gap trùng khớp, đặt lệnh Buy Limit tại mức Fibonacci 61.8% ({entry}) - vùng hồi thoái lui phổ biến trước khi tiếp diễn xu hướng tăng."}
 
-    # bias < 0 (xu huong giam)
     if last_close <= swing_low * 1.002:
         entry = round(swing_low * 0.9985, 2)
         sl = round(swing_low + extension * 0.25, 2)
         tp = round(entry - extension, 2)
         return {"order_type": "Sell Stop", "entry": entry, "sl": sl, "tp": tp,
-                "reason": f"Gia dang o sat day song gan nhat ({swing_low}) trong xu huong giam -> cho gia XAC NHAN pha vo bang lenh Sell Stop phia duoi, tranh vao som khi chua breakout that."}
+                "reason": f"Giá đang ở sát đáy sóng gần nhất ({swing_low}) trong xu hướng giảm -> chờ giá XÁC NHẬN phá vỡ bằng lệnh Sell Stop phía dưới, tránh vào sớm khi chưa breakout thật."}
     matched = [g for g in gaps if g["type"] == "bearish" and g["bottom"] <= golden_high and g["top"] >= golden_low]
     if matched:
         g = matched[-1]
@@ -617,31 +575,27 @@ def pending_order_suggestion(candles, score):
         sl = round(g["top"] + extension * 0.1, 2)
         tp = round(swing_low, 2)
         return {"order_type": "Sell Limit", "entry": entry, "sl": sl, "tp": tp,
-                "reason": f"Vung hop luu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trung voi Fair Value Gap giam ({g['bottom']}-{g['top']}) -> dat lenh Sell Limit cho gia hoi len vung nay truoc khi tiep tuc giam."}
-    entry = golden_high  # muc 38.2% - vung hoi nong hon, gia ban cao hon
+                "reason": f"Vùng hợp lưu Fibonacci (38.2%-61.8%: {golden_low}-{golden_high}) trùng với Fair Value Gap giảm ({g['bottom']}-{g['top']}) -> đặt lệnh Sell Limit chờ giá hồi lên vùng này trước khi tiếp tục giảm."}
+    entry = golden_high
     sl = round(swing_high + extension * 0.1, 2)
     tp = round(swing_low, 2)
     return {"order_type": "Sell Limit", "entry": entry, "sl": sl, "tp": tp,
-            "reason": f"Chua tim thay Fair Value Gap trung khop, dat lenh Sell Limit tai muc Fibonacci 38.2% ({entry}) - vung hoi len pho bien truoc khi tiep dien xu huong giam."}
+            "reason": f"Chưa tìm thấy Fair Value Gap trùng khớp, đặt lệnh Sell Limit tại mức Fibonacci 38.2% ({entry}) - vùng hồi lên phổ biến trước khi tiếp diễn xu hướng giảm."}
 
 
 def liquidity_sweep(candles, lookback=30, check_recent=5):
-    """Phat hien hanh vi 'quet thanh khoan': gia pha vo dinh/day cu trong
-    choc lat roi dong cua nguoc lai - dau hieu 'san' lenh dung/cat lo cua
-    dam dong truoc khi dao chieu, thuong duoc trader SMC dung de vao lenh."""
     window = candles[-lookback:] if len(candles) >= lookback else candles
     if len(window) < check_recent + 5:
-        return {"label": "Chua du du lieu de kiem tra quet thanh khoan.", "direction": 0}
+        return {"label": "Chưa đủ dữ liệu để kiểm tra quét thanh khoản.", "direction": 0}
     ref = window[:-check_recent]
     ref_high = max(c["high"] for c in ref)
     ref_low = min(c["low"] for c in ref)
     for c in window[-check_recent:]:
         if c["high"] > ref_high and c["close"] < ref_high:
-            return {"label": f"Phat hien quet thanh khoan tai dinh cu {round(ref_high,2)} roi dong cua duoi lai -> tin hieu dao chieu giam.", "direction": -1}
+            return {"label": f"Phát hiện quét thanh khoản tại đỉnh cũ {round(ref_high,2)} rồi đóng cửa dưới lại -> tín hiệu đảo chiều giảm.", "direction": -1}
         if c["low"] < ref_low and c["close"] > ref_low:
-            return {"label": f"Phat hien quet thanh khoan tai day cu {round(ref_low,2)} roi dong cua tren lai -> tin hieu dao chieu tang.", "direction": 1}
-    return {"label": "Chua phat hien hanh vi quet thanh khoan ro ret gan day.", "direction": 0}
-
+            return {"label": f"Phát hiện quét thanh khoản tại đáy cũ {round(ref_low,2)} rồi đóng cửa trên lại -> tín hiệu đảo chiều tăng.", "direction": 1}
+    return {"label": "Chưa phát hiện hành vi quét thanh khoản rõ rệt gần đây.", "direction": 0}
 
 
 def wyckoff_heuristic(candles, recent_n=10, prior_n=20):
@@ -658,12 +612,12 @@ def wyckoff_heuristic(candles, recent_n=10, prior_n=20):
     range_high = max(c["high"] for c in recent[:-1])
     range_low = min(c["low"] for c in recent[:-1])
     if contracting and last_close > range_high:
-        return {"phase": "Thoat tich luy, breakout huong len", "direction": 1, "contracting": True}
+        return {"phase": "Thoát tích lũy, breakout hướng lên", "direction": 1, "contracting": True}
     if contracting and last_close < range_low:
-        return {"phase": "Thoat phan phoi, breakout huong xuong", "direction": -1, "contracting": True}
+        return {"phase": "Thoát phân phối, breakout hướng xuống", "direction": -1, "contracting": True}
     if contracting:
-        return {"phase": "Dang trong giai doan bien do co hep (tich luy/phan phoi), chua breakout", "direction": 0, "contracting": True}
-    return {"phase": "Bien do chua co hep ro ret, chua thay dau hieu tich luy/phan phoi", "direction": 0, "contracting": False}
+        return {"phase": "Đang trong giai đoạn biên độ co hẹp (tích lũy/phân phối), chưa breakout", "direction": 0, "contracting": True}
+    return {"phase": "Biên độ chưa co hẹp rõ rệt, chưa thấy dấu hiệu tích lũy/phân phối", "direction": 0, "contracting": False}
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +629,6 @@ def zigzag_pivots(candles, threshold_pct=0.015, window=200):
     if len(data) < 5:
         return pivots
     last_pivot_price = data[0]["close"]
-    last_pivot_type = None  # 'H' or 'L'
     trend = None
     for c in data:
         if trend is None:
@@ -704,7 +657,7 @@ def zigzag_pivots(candles, threshold_pct=0.015, window=200):
 def elliott_heuristic(candles):
     pivots = zigzag_pivots(candles)
     if len(pivots) < 4:
-        return {"structure": "Chua du diem xoay chieu (pivot) de xac dinh cau truc song", "direction": 0}
+        return {"structure": "Chưa đủ điểm xoay chiều (pivot) để xác định cấu trúc sóng", "direction": 0}
     last4 = pivots[-4:]
     highs = [p for t, p in last4 if t == "H"]
     lows = [p for t, p in last4 if t == "L"]
@@ -713,10 +666,10 @@ def elliott_heuristic(candles):
     lower_highs = len(highs) >= 2 and highs == sorted(highs, reverse=True)
     lower_lows = len(lows) >= 2 and lows == sorted(lows, reverse=True)
     if higher_highs and higher_lows:
-        return {"structure": "Cau truc dinh cao hon - day cao hon (giong song day tang)", "direction": 1}
+        return {"structure": "Cấu trúc đỉnh cao hơn - đáy cao hơn (giống sóng đẩy tăng)", "direction": 1}
     if lower_highs and lower_lows:
-        return {"structure": "Cau truc dinh thap hon - day thap hon (giong song day giam)", "direction": -1}
-    return {"structure": "Cau truc song dan xen, chua ro huong (co the dang trong song dieu chinh)", "direction": 0}
+        return {"structure": "Cấu trúc đỉnh thấp hơn - đáy thấp hơn (giống sóng đẩy giảm)", "direction": -1}
+    return {"structure": "Cấu trúc sóng đan xen, chưa rõ hướng (có thể đang trong sóng điều chỉnh)", "direction": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -732,12 +685,12 @@ def dxy_trend(timeframe):
         last = closes[-1]
         change_pct = (last - slope_ref) / slope_ref * 100
         if change_pct > 0.15:
-            return {"direction": -1, "change_pct": round(change_pct, 2)}  # DXY tang -> bat loi cho vang
+            return {"direction": -1, "change_pct": round(change_pct, 2)}
         if change_pct < -0.15:
-            return {"direction": 1, "change_pct": round(change_pct, 2)}  # DXY giam -> ho tro vang
+            return {"direction": 1, "change_pct": round(change_pct, 2)}
         return {"direction": 0, "change_pct": round(change_pct, 2)}
     except Exception:
-        return None  # neu goi khong duoc (han che du lieu chi so), bo qua yeu to nay
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -753,13 +706,14 @@ def higher_timeframe_trend(higher_tf_label, higher_candles):
 
 
 # ---------------------------------------------------------------------------
-# 10. Tong hop hop luu - bo yeu to THICH UNG theo khung thoi gian
+# 10. Tong hop hop luu - bo yeu to thich ung theo khung thoi gian
 # ---------------------------------------------------------------------------
 def build_signal(timeframe, candles, higher_tf_info):
     closes = [c["close"] for c in candles]
     if len(closes) < 90:
-        return {"score": 0, "verdict": "CHUA DU DU LIEU", "details": {}, "values": {}, "reasons": [],
-                "summary": f"Chi nhan duoc {len(closes)} nen, can toi thieu ~90 nen de tinh du cac yeu to phan tich."}
+        return {"score": 0, "verdict": "CHƯA ĐỦ DỮ LIỆU", "details": {}, "values": {}, "reasons": [],
+                "summary": f"Chỉ nhận được {len(closes)} nến, cần tối thiểu ~90 nến để tính đủ các yếu tố phân tích.",
+                "detail_labels": DETAIL_LABELS_VI}
 
     is_short = timeframe in SHORT_TFS
     last_close = closes[-1]
@@ -772,65 +726,63 @@ def build_signal(timeframe, candles, higher_tf_info):
 
     details, reasons = {}, []
 
-    # --- Chi bao co ban (moi khung) ---
     if r < 30:
-        details["RSI"] = 1; reasons.append(f"RSI dang o {r}, vung qua ban -> ap luc ban co the da suy yeu.")
+        details["RSI"] = 1; reasons.append(f"RSI đang ở {r}, vùng quá bán -> áp lực bán có thể đã suy yếu.")
     elif r > 70:
-        details["RSI"] = -1; reasons.append(f"RSI dang o {r}, vung qua mua -> rui ro dieu chinh giam.")
+        details["RSI"] = -1; reasons.append(f"RSI đang ở {r}, vùng quá mua -> rủi ro điều chỉnh giảm.")
     else:
-        details["RSI"] = 0; reasons.append(f"RSI dang o {r}, vung trung tinh.")
+        details["RSI"] = 0; reasons.append(f"RSI đang ở {r}, vùng trung tính.")
 
     if macd_s is not None and macd_v > macd_s:
-        details["MACD"] = 1; reasons.append(f"MACD ({macd_v}) tren duong tin hieu ({macd_s}) -> dong luong nghieng tang.")
+        details["MACD"] = 1; reasons.append(f"MACD ({macd_v}) trên đường tín hiệu ({macd_s}) -> động lượng nghiêng tăng.")
     else:
-        details["MACD"] = -1; reasons.append(f"MACD ({macd_v}) duoi duong tin hieu ({macd_s}) -> dong luong nghieng giam.")
+        details["MACD"] = -1; reasons.append(f"MACD ({macd_v}) dưới đường tín hiệu ({macd_s}) -> động lượng nghiêng giảm.")
 
     if ma20 > ma50:
-        details["MA_Trend"] = 1; reasons.append(f"MA20 ({round(ma20,2)}) tren MA50 ({round(ma50,2)}) -> xu huong tang.")
+        details["MA_Trend"] = 1; reasons.append(f"MA20 ({round(ma20,2)}) trên MA50 ({round(ma50,2)}) -> xu hướng tăng.")
     else:
-        details["MA_Trend"] = -1; reasons.append(f"MA20 ({round(ma20,2)}) duoi MA50 ({round(ma50,2)}) -> xu huong giam.")
+        details["MA_Trend"] = -1; reasons.append(f"MA20 ({round(ma20,2)}) dưới MA50 ({round(ma50,2)}) -> xu hướng giảm.")
 
     if last_close <= bb_l:
-        details["Bollinger"] = 1; reasons.append(f"Gia cham/xuyen dai duoi Bollinger ({bb_l}) -> kha nang bat lai.")
+        details["Bollinger"] = 1; reasons.append(f"Giá chạm/xuyên dải dưới Bollinger ({bb_l}) -> khả năng bật lại.")
     elif last_close >= bb_u:
-        details["Bollinger"] = -1; reasons.append(f"Gia cham/xuyen dai tren Bollinger ({bb_u}) -> ap luc chot loi.")
+        details["Bollinger"] = -1; reasons.append(f"Giá chạm/xuyên dải trên Bollinger ({bb_u}) -> áp lực chốt lời.")
     else:
-        details["Bollinger"] = 0; reasons.append(f"Gia dao dong trong dai Bollinger ({bb_l} - {bb_u}).")
+        details["Bollinger"] = 0; reasons.append(f"Giá dao động trong dải Bollinger ({bb_l} - {bb_u}).")
 
     details["Candle_Pattern"] = pattern_dir
-    reasons.append(f"Mo hinh nen (price action): {pattern_name}"
-                    + (" -> tin hieu tang gia." if pattern_dir == 1 else
-                       " -> tin hieu giam gia." if pattern_dir == -1 else " -> chua ro huong."))
+    reasons.append(f"Mô hình nến (price action): {pattern_name}"
+                    + (" -> tín hiệu tăng giá." if pattern_dir == 1 else
+                       " -> tín hiệu giảm giá." if pattern_dir == -1 else " -> chưa rõ hướng."))
 
     if fib:
         near = fib["proximity"] < 0.05
         trend_up = ma20 > ma50
         if near and trend_up:
             details["Fibonacci"] = 1
-            reasons.append(f"Gia gan muc Fibonacci {fib['nearest_level']} ({fib['nearest_value']}) trong xu huong tang -> vung ho tro tiem nang.")
+            reasons.append(f"Giá gần mức Fibonacci {fib['nearest_level']} ({fib['nearest_value']}) trong xu hướng tăng -> vùng hỗ trợ tiềm năng.")
         elif near and not trend_up:
             details["Fibonacci"] = -1
-            reasons.append(f"Gia gan muc Fibonacci {fib['nearest_level']} ({fib['nearest_value']}) trong xu huong giam -> vung khang cu tiem nang.")
+            reasons.append(f"Giá gần mức Fibonacci {fib['nearest_level']} ({fib['nearest_value']}) trong xu hướng giảm -> vùng kháng cự tiềm năng.")
         else:
             details["Fibonacci"] = 0
-            reasons.append(f"Gia chua tiep can muc Fibonacci dang chu y (gan nhat: {fib['nearest_level']}).")
+            reasons.append(f"Giá chưa tiếp cận mức Fibonacci đáng chú ý (gần nhất: {fib['nearest_level']}).")
     else:
         details["Fibonacci"] = 0
-        reasons.append("Chua du du lieu song gia de xac dinh Fibonacci.")
+        reasons.append("Chưa đủ dữ liệu sóng giá để xác định Fibonacci.")
 
     if higher_tf_info:
         details["Da_khung"] = higher_tf_info["direction"]
-        huong = "tang" if higher_tf_info["direction"] > 0 else "giam"
-        reasons.append(f"Khung lon hon ({higher_tf_info['timeframe']}) dang xu huong {huong} -> dung doi chieu, tranh nguoc xu huong lon.")
+        huong = "tăng" if higher_tf_info["direction"] > 0 else "giảm"
+        reasons.append(f"Khung lớn hơn ({higher_tf_info['timeframe']}) đang xu hướng {huong} -> dùng đối chiếu, tránh ngược xu hướng lớn.")
     else:
         details["Da_khung"] = 0
-        reasons.append("Day la khung lon nhat duoc ho tro (W1), khong co khung cao hon de doi chieu.")
+        reasons.append("Đây là khung lớn nhất được hỗ trợ (W1), không có khung cao hơn để đối chiếu.")
 
-    # --- Smart Money Concepts (SMC) - ap dung cho moi khung thoi gian ---
     pivots = zigzag_pivots(candles)
     structure = market_structure_bos_choch(candles, pivots)
     details["SMC_Structure"] = structure["direction"]
-    reasons.append(f"[SMC - Cau truc thi truong] {structure['label']}")
+    reasons.append(f"[SMC - Cấu trúc thị trường] {structure['label']}")
 
     fvg = fair_value_gap(candles)
     details["SMC_FVG"] = fvg["direction"]
@@ -838,51 +790,49 @@ def build_signal(timeframe, candles, higher_tf_info):
 
     sweep = liquidity_sweep(candles)
     details["SMC_Liquidity"] = sweep["direction"]
-    reasons.append(f"[SMC - Thanh khoan] {sweep['label']}")
+    reasons.append(f"[SMC - Thanh khoản] {sweep['label']}")
 
     ichimoku_data, wyckoff_data, elliott_data, dxy_data = None, None, None, None
 
     if is_short:
-        # --- Uu tien: Ichimoku cho khung ngan ---
         ichimoku_data = ichimoku(candles)
         if ichimoku_data:
             if ichimoku_data["price_above_cloud"] and ichimoku_data["tenkan_above_kijun"]:
                 details["Ichimoku"] = 1
-                reasons.append(f"Gia dang o TREN may Kumo (Ichimoku) va Tenkan cat len tren Kijun -> tin hieu tang manh theo Ichimoku.")
+                reasons.append("Giá đang ở TRÊN mây Kumo (Ichimoku) và Tenkan cắt lên trên Kijun -> tín hiệu tăng mạnh theo Ichimoku.")
             elif ichimoku_data["price_below_cloud"] and not ichimoku_data["tenkan_above_kijun"]:
                 details["Ichimoku"] = -1
-                reasons.append(f"Gia dang o DUOI may Kumo (Ichimoku) va Tenkan cat xuong duoi Kijun -> tin hieu giam manh theo Ichimoku.")
+                reasons.append("Giá đang ở DƯỚI mây Kumo (Ichimoku) và Tenkan cắt xuống dưới Kijun -> tín hiệu giảm mạnh theo Ichimoku.")
             else:
                 details["Ichimoku"] = 0
-                reasons.append("Gia dang o trong hoac gan may Kumo (Ichimoku) -> xu huong chua ro rang, nen than trong.")
+                reasons.append("Giá đang ở trong hoặc gần mây Kumo (Ichimoku) -> xu hướng chưa rõ ràng, nên thận trọng.")
         else:
             details["Ichimoku"] = 0
-            reasons.append("Chua du du lieu lich su de tinh may Kumo (Ichimoku).")
+            reasons.append("Chưa đủ dữ liệu lịch sử để tính mây Kumo (Ichimoku).")
     else:
-        # --- Them cho khung dai: Wyckoff, Elliott, DXY ---
         wyckoff_data = wyckoff_heuristic(candles)
         if wyckoff_data:
             details["Wyckoff"] = wyckoff_data["direction"]
-            reasons.append(f"[Wyckoff-inspired, don gian hoa vi khong co du lieu khoi luong] {wyckoff_data['phase']}.")
+            reasons.append(f"[Wyckoff-inspired, đơn giản hóa vì không có dữ liệu khối lượng] {wyckoff_data['phase']}.")
         else:
             details["Wyckoff"] = 0
 
         elliott_data = elliott_heuristic(candles)
         details["Elliott"] = elliott_data["direction"]
-        reasons.append(f"[Elliott-inspired, tham khao] {elliott_data['structure']}.")
+        reasons.append(f"[Elliott-inspired, tham khảo] {elliott_data['structure']}.")
 
         dxy_data = dxy_trend(timeframe)
         if dxy_data:
             details["DXY"] = dxy_data["direction"]
             if dxy_data["direction"] == 1:
-                reasons.append(f"Chi so DXY (dong USD) giam {abs(dxy_data['change_pct'])}% gan day -> USD yeu thuong ho tro gia vang tang.")
+                reasons.append(f"Chỉ số DXY (đồng USD) giảm {abs(dxy_data['change_pct'])}% gần đây -> USD yếu thường hỗ trợ giá vàng tăng.")
             elif dxy_data["direction"] == -1:
-                reasons.append(f"Chi so DXY (dong USD) tang {dxy_data['change_pct']}% gan day -> USD manh thuong gay ap luc len gia vang.")
+                reasons.append(f"Chỉ số DXY (đồng USD) tăng {dxy_data['change_pct']}% gần đây -> USD mạnh thường gây áp lực lên giá vàng.")
             else:
-                reasons.append("Chi so DXY (dong USD) di ngang, chua tao ap luc ro ret len gia vang.")
+                reasons.append("Chỉ số DXY (đồng USD) đi ngang, chưa tạo áp lực rõ rệt lên giá vàng.")
         else:
             details["DXY"] = 0
-            reasons.append("Khong lay duoc du lieu DXY luc nay (co the goi mien phi khong ho tro chi so nay) -> bo qua yeu to lien thi truong.")
+            reasons.append("Không lấy được dữ liệu DXY lúc này (có thể gói miễn phí không hỗ trợ chỉ số này) -> bỏ qua yếu tố liên thị trường.")
 
     raw = sum(details.values())
     max_score = len(details)
@@ -891,21 +841,21 @@ def build_signal(timeframe, candles, higher_tf_info):
     sell_n = sum(1 for v in details.values() if v < 0)
 
     if score >= 50:
-        verdict = "MUA MANH" if score >= 75 else "MUA"
+        verdict = "MUA MẠNH" if score >= 75 else "MUA"
     elif score <= -50:
-        verdict = "BAN MANH" if score <= -75 else "BAN"
+        verdict = "BÁN MẠNH" if score <= -75 else "BÁN"
     else:
-        verdict = "TRUNG LAP"
+        verdict = "TRUNG LẬP"
 
-    mode_label = ("Che do khung NGAN HAN: uu tien Price Action + Ichimoku + Fibonacci"
+    mode_label = ("Chế độ khung NGẮN HẠN: ưu tiên Price Action + Ichimoku + Fibonacci"
                   if is_short else
-                  "Che do khung DAI HAN: ket hop them Wyckoff/Elliott (heuristic) + lien thi truong DXY")
-    summary = (f"{mode_label}. {buy_n}/{max_score} yeu to nghieng mua, {sell_n}/{max_score} nghieng ban. "
-               f"Diem hop luu: {score}/100 -> khuyen nghi: {verdict}.")
+                  "Chế độ khung DÀI HẠN: kết hợp thêm Wyckoff/Elliott (heuristic) + liên thị trường DXY")
+    summary = (f"{mode_label}. {buy_n}/{max_score} yếu tố nghiêng mua, {sell_n}/{max_score} nghiêng bán. "
+               f"Điểm hợp lưu: {score}/100 -> khuyến nghị: {verdict}.")
 
     values = {"rsi": r, "macd": macd_v, "macd_signal": macd_s, "ma20": round(ma20, 2), "ma50": round(ma50, 2),
               "bb_lower": bb_l, "bb_mid": bb_m, "bb_upper": bb_u, "pattern_name": pattern_name,
-              "higher_tf_label": higher_tf_info["timeframe"] if higher_tf_info else "Khong co",
+              "higher_tf_label": higher_tf_info["timeframe"] if higher_tf_info else "Không có",
               "analysis_mode": "NGAN_HAN" if is_short else "DAI_HAN"}
     if ichimoku_data: values["ichimoku"] = ichimoku_data
     if wyckoff_data: values["wyckoff_phase"] = wyckoff_data["phase"]
@@ -913,7 +863,7 @@ def build_signal(timeframe, candles, higher_tf_info):
     if dxy_data: values["dxy_change_pct"] = dxy_data["change_pct"]
 
     return {"score": score, "verdict": verdict, "details": details, "values": values,
-            "reasons": reasons, "summary": summary}
+            "reasons": reasons, "summary": summary, "detail_labels": DETAIL_LABELS_VI}
 
 
 # ---------------------------------------------------------------------------
@@ -926,10 +876,10 @@ class handler(BaseHTTPRequestHandler):
         timeframe = qs.get("timeframe", ["H1"])[0]
 
         if timeframe not in INTERVAL_MAP:
-            self._send(400, {"error": f"Khung thoi gian khong hop le. Chon trong: {list(INTERVAL_MAP)}"})
+            self._send(400, {"error": f"Khung thời gian không hợp lệ. Chọn trong: {list(INTERVAL_MAP)}"})
             return
         if not TD_API_KEY:
-            self._send(500, {"error": "Chua cau hinh TWELVEDATA_API_KEY tren Vercel (xem file huong dan)."})
+            self._send(500, {"error": "Chưa cấu hình TWELVEDATA_API_KEY trên Vercel (xem file hướng dẫn)."})
             return
 
         try:
@@ -957,7 +907,7 @@ class handler(BaseHTTPRequestHandler):
                 stats = bt.get(side)
                 if stats:
                     backtest_info = {
-                        "direction": "MUA" if side == "buy" else "BAN",
+                        "direction": "MUA" if side == "buy" else "BÁN",
                         "win_rate": stats["win_rate"],
                         "samples": stats["samples"],
                         "lookahead": bt["lookahead"],
@@ -977,7 +927,7 @@ class handler(BaseHTTPRequestHandler):
                 "price_map": price_map,
             })
         except Exception as e:
-            self._send(502, {"error": f"Loi lay du lieu tu TwelveData: {e}"})
+            self._send(502, {"error": f"Lỗi lấy dữ liệu từ TwelveData: {e}"})
 
     def _send(self, code, payload):
         self.send_response(code)
